@@ -21,7 +21,7 @@ C_WHITE='\033[1;37m'
 
 # Das Verzeichnis, in dem sich dieses Skript befindet (das Projekt-Stammverzeichnis)
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
-LAUNCHER_SCRIPT="$SCRIPT_DIR/myrient.sh"
+LAUNCHER_SCRIPT="$SCRIPT_DIR/start.sh"
 ALIAS_NAME="myrient"
 ALIAS_COMMAND="alias $ALIAS_NAME='bash \"$LAUNCHER_SCRIPT\"'"
 
@@ -333,13 +333,13 @@ case "$1" in
         ;;
     *)
         echo -e "Verwendung: ${C_YELLOW}./manage.sh [install|uninstall|clean|status|update|backup|restore]${C_RESET}"
-        echo "  ${C_GREEN}install${C_RESET}    - Fügt den 'myrient' Alias zu Ihrer Shell-Konfiguration hinzu."
-        echo "  ${C_RED}uninstall${C_RESET}  - Entfernt den 'myrient' Alias aus Ihrer Shell-Konfiguration."
-        echo "  ${C_CYAN}clean${C_RESET}      - Löscht die Konfigurations- und Verlaufsdateien."
-        echo "  ${C_WHITE}status${C_RESET}     - Zeigt den aktuellen Installationsstatus an."
-        echo "  ${C_YELLOW}update${C_RESET}     - Sucht nach einer neuen Version und aktualisiert das Skript."
-        echo "  ${C_BLUE}backup${C_RESET}     - Erstellt ein ZIP-Archiv des gesamten Projektverzeichnisses."
-        echo "  ${C_PURPLE}restore${C_RESET}    - Stellt das Projekt aus einem Backup-Archiv wieder her."
+        echo -e "  ${C_GREEN}install${C_RESET}    - Fügt den 'myrient' Alias zu Ihrer Shell-Konfiguration hinzu."
+        echo -e "  ${C_RED}uninstall${C_RESET}  - Entfernt den 'myrient' Alias aus Ihrer Shell-Konfiguration."
+        echo -e "  ${C_CYAN}clean${C_RESET}      - Löscht die Konfigurations- und Verlaufsdateien."
+        echo -e "  ${C_WHITE}status${C_RESET}     - Zeigt den aktuellen Installationsstatus an."
+        echo -e "  ${C_YELLOW}update${C_RESET}     - Sucht nach einer neuen Version und aktualisiert das Skript."
+        echo -e "  ${C_BLUE}backup${C_RESET}     - Erstellt ein ZIP-Archiv des gesamten Projektverzeichnisses."
+        echo -e "  ${C_PURPLE}restore${C_RESET}    - Stellt das Projekt aus einem Backup-Archiv wieder her."
         exit 1
         ;;
 esac

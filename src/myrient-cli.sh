@@ -1510,7 +1510,7 @@ search_and_download_games() {
                             path=$(echo "$game_choice" | cut -d'|' -f1)
                             name=$(echo "$game_choice" | cut -d'|' -f2)
                             echo -e "${C_CYAN}Starte Download für: ${C_WHITE}$name${C_RESET}"
-                            if wget -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" --show-progress "${BASE_URL}${path}"; then
+                            if wget -q -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" --show-progress "${BASE_URL}${path}"; then
                                 echo -e "${C_GREEN}Download von '$name' abgeschlossen.${C_RESET}"
                                 # Protokolliere den erfolgreichen Download
                                 mkdir -p "$(dirname "$DOWNLOAD_HISTORY_LOG")"

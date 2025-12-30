@@ -1635,14 +1635,17 @@ search_and_download_games() {
                 return
             fi
 
-            if [ ${#game_keyword} -eq 1 ]; then
+            if [ ${#game_keyword} -eq 2 ]; then
+                echo -e "${C_CYAN}Suche nach Sprachcode '${C_WHITE}$game_keyword${C_CYAN}'...${C_RESET}"
+                # Regex: sucht nach (de, oder (de) oder  de, oder  de) ohne Berücksichtigung der Groß-/Kleinschreibung
+                mapfile -t game_results < <(printf '%s\n' "${all_games[@]}" | grep -iE -- "[ (]${game_keyword}[,)]")
+            elif [ ${#game_keyword} -eq 1 ]; then
                 echo -e "${C_CYAN}Suche nach Spielen, die mit '${C_WHITE}$game_keyword${C_CYAN}' beginnen...${C_RESET}"
                 # Verwende awk für robustes Filtern. index(...) == 1 bedeutet "beginnt mit".
                 # Wir müssen sicherstellen, dass wir das zweite Feld (Titel) prüfen.
                 mapfile -t game_results < <(printf '%s\n' "${all_games[@]}" | awk -F '|' -v kw="$game_keyword" 'BEGIN{kw=tolower(kw)} index(tolower($2), kw) == 1')
             else
                 echo -e "${C_CYAN}Suche nach Spielen, die '${C_WHITE}$game_keyword${C_CYAN}' enthalten...${C_RESET}"
-                # index(...) > 0 bedeutet "enthält".
                 mapfile -t game_results < <(printf '%s\n' "${all_games[@]}" | awk -F '|' -v kw="$game_keyword" 'BEGIN{kw=tolower(kw)} index(tolower($2), kw) > 0')
             fi
 
@@ -1672,14 +1675,26 @@ search_and_download_games() {
 
             local display_results=()
             for item in "${game_results[@]}"; do
-                local display_name size marker
+                local display_name size marker on_watchlist is_downloaded color
                 display_name=$(echo "$item" | cut -d'|' -f2)
                 size=$(echo "$item" | cut -d'|' -f3)
-                marker=" "
-                if [ -f "$DOWNLOAD_HISTORY_LOG" ] && grep -q -F -- "$display_name" "$DOWNLOAD_HISTORY_LOG"; then
-                    marker="✔"
+                color="$C_RESET" # Standardfarbe
+
+                on_watchlist=false
+                [ -f "$WATCHLIST_FILE" ] && grep -q -F -- "|$display_name|" "$WATCHLIST_FILE" && on_watchlist=true
+
+                is_downloaded=false
+                [ -f "$DOWNLOAD_HISTORY_LOG" ] && grep -q -F -- "$display_name" "$DOWNLOAD_HISTORY_LOG" && is_downloaded=true
+
+                if $is_downloaded; then
+                    marker="✔"; color="$C_GREEN" # Bereits heruntergeladen -> Grün
+                elif $on_watchlist; then
+                    marker="★"; color="$C_YELLOW" # Auf der Merkliste -> Orange/Gelb
+                else
+                    marker=" " # Weder noch
                 fi
-                display_results+=("[$marker] $display_name ($size)")
+
+                display_results+=("${color}$marker $display_name ${C_GRAY}($size)${C_RESET}")
             done
 
             local selections

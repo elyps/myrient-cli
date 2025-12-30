@@ -1262,7 +1262,7 @@ show_main_menu() {
         "Haftungsausschluss widerrufen" \
         "Über das Skript" \
         "Beenden" \
-        --height 50 --cursor-prefix "  " --header ""
+        --cursor-prefix "  " --header ""
 }
 
 # Hauptfunktion des Skripts

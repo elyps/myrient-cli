@@ -1683,10 +1683,10 @@ search_and_download_games() {
             done
 
             local selections
-            selections=$(printf '%s\n' "${display_results[@]}" | gum filter --no-limit --placeholder "Spiele zum Herunterladen auswählen (Enter zum Bestätigen)...")
+            selections=$(printf '%s\n' "${display_results[@]}" | gum filter --no-limit --placeholder "Spiele auswählen (Leertaste) und mit Enter bestätigen...")
 
             if [[ -n "$selections" ]]; then
-                local games_to_download_paths=()
+                local selected_full_items=()
                 mapfile -t selected_lines < <(echo "$selections")
                 for line in "${selected_lines[@]}"; do
                     # Extrahiere den reinen Dateinamen, um den ursprünglichen Eintrag zu finden
@@ -1695,67 +1695,80 @@ search_and_download_games() {
                     # Finde den passenden Eintrag in den ursprünglichen Ergebnissen
                     local original_entry
                     original_entry=$(printf '%s\n' "${game_results[@]}" | grep -F -- "|$clean_name|")
-                    games_to_download_paths+=("$original_entry")
+                    selected_full_items+=("$original_entry")
                 done
 
-                if [ ${#games_to_download_paths[@]} -gt 0 ]; then
-                    if gum confirm "Downloads im Hintergrund ausführen?"; then
-                        echo "Starte Downloads im Hintergrund (Maximal $MAX_CONCURRENT_DOWNLOADS gleichzeitig)..."
-                        local count=0
-                        for game_choice in "${games_to_download_paths[@]}"; do
-                            # Warte, wenn die maximale Anzahl an Prozessen erreicht ist
-                            if [[ $count -ge $MAX_CONCURRENT_DOWNLOADS ]]; then
-                                echo -e "${C_CYAN}Warte auf einen freien Download-Slot...${C_RESET}"
-                                wait -n
-                                ((count--))
-                            fi
-                            local path name
-                            path=$(echo "$game_choice" | cut -d'|' -f1)
-                            name=$(echo "$game_choice" | cut -d'|' -f2)
-                            # Eindeutige Log-Datei für jeden Download
-                            mkdir -p "$PROJECT_ROOT/logs"
-                            log_file="$PROJECT_ROOT/logs/$(basename "$name").log"
+                if [ ${#selected_full_items[@]} -gt 0 ]; then
+                    local action
+                    action=$(gum choose "Herunterladen" "Zur Merkliste hinzufügen" "Abbrechen")
 
-                            echo -e "${C_CYAN}Starte Hintergrund-Download für: ${C_WHITE}$name${C_RESET}" 
-                            wget -b -c -P "$DOWNLOAD_DIR" --limit-rate="$DOWNLOAD_SPEED_LIMIT" --progress=bar:force:noscroll -o "$log_file" -- "${BASE_URL}${path}" &
-                            ((count++))
-                        done
-                        echo "Alle Downloads wurden in die Warteschlange gestellt. Warten bis alle fertig sind..."
-                        wait # Warte auf alle Hintergrundprozesse in dieser Schleife
-                        # Protokolliere die abgeschlossenen Downloads
-                        gum spin --title "Protokolliere abgeschlossene Hintergrund-Downloads..." -- sleep 1
-                        for game_choice in "${games_to_download_paths[@]}"; do
-                            local name=$(echo "$game_choice" | cut -d'|' -f2)
-                            mkdir -p "$(dirname "$DOWNLOAD_HISTORY_LOG")"
-                            echo "[$(date '+%Y-%m-%d %H:%M:%S')] - [$console_name] - $name" >> "$DOWNLOAD_HISTORY_LOG"
-                        done
-                        if [[ "$AUTO_EXTRACT" == "yes" ]]; then
-                            for game_choice in "${games_to_download_paths[@]}"; do
-                                extract_archive "$DOWNLOAD_DIR/$(basename "$(echo "$game_choice" | cut -d'|' -f2)")"
-                            done
-                        fi
-                        echo -e "${C_GREEN}Alle Hintergrund-Downloads dieser Sitzung sind abgeschlossen.${C_RESET}"
-                    else
-                        echo -e "${HEADLINE_COLOR}-----------------------------------------------------------------${C_RESET}"
-                        for game_choice in "${games_to_download_paths[@]}"; do
-                            path=$(echo "$game_choice" | cut -d'|' -f1)
-                            name=$(echo "$game_choice" | cut -d'|' -f2)
-                            echo -e "${HEADLINE_COLOR}-----------------------------------------------------------------${C_RESET}"
-                            gum style --border normal --padding "0 1" --border-foreground 212 "Starte Download für: $(gum style --bold "$name")"
-                            if wget -q -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" --show-progress "${BASE_URL}${path}"; then
-                                gum style --foreground 10 "Download von '$name' abgeschlossen."
-                                # Protokolliere den erfolgreichen Download
-                                mkdir -p "$(dirname "$DOWNLOAD_HISTORY_LOG")"
-                                echo "[$(date '+%Y-%m-%d %H:%M:%S')] - [$console_name] - $name" >> "$DOWNLOAD_HISTORY_LOG"
-                                # Lösche die Log-Datei, falls eine durch einen vorherigen fehlgeschlagenen Versuch existiert
-                                rm -f "$PROJECT_ROOT/logs/$(basename "$name").log" 2>/dev/null
+                    case "$action" in
+                        "Herunterladen")
+                            if gum confirm "Downloads im Hintergrund ausführen?"; then
+                                echo "Starte Downloads im Hintergrund (Maximal $MAX_CONCURRENT_DOWNLOADS gleichzeitig)..."
+                                local count=0
+                                for game_choice in "${selected_full_items[@]}"; do
+                                    # Warte, wenn die maximale Anzahl an Prozessen erreicht ist
+                                    if [[ $count -ge $MAX_CONCURRENT_DOWNLOADS ]]; then
+                                        echo -e "${C_CYAN}Warte auf einen freien Download-Slot...${C_RESET}"
+                                        wait -n
+                                        ((count--))
+                                    fi
+                                    local path name
+                                    path=$(echo "$game_choice" | cut -d'|' -f1)
+                                    name=$(echo "$game_choice" | cut -d'|' -f2)
+                                    # Eindeutige Log-Datei für jeden Download
+                                    mkdir -p "$PROJECT_ROOT/logs"
+                                    log_file="$PROJECT_ROOT/logs/$(basename "$name").log"
+
+                                    echo -e "${C_CYAN}Starte Hintergrund-Download für: ${C_WHITE}$name${C_RESET}" 
+                                    wget -b -c -P "$DOWNLOAD_DIR" --limit-rate="$DOWNLOAD_SPEED_LIMIT" --progress=bar:force:noscroll -o "$log_file" -- "${BASE_URL}${path}" &
+                                    ((count++))
+                                done
+                                echo "Alle Downloads wurden in die Warteschlange gestellt. Warten bis alle fertig sind..."
+                                wait # Warte auf alle Hintergrundprozesse in dieser Schleife
+                                # Protokolliere die abgeschlossenen Downloads
+                                gum spin --title "Protokolliere abgeschlossene Hintergrund-Downloads..." -- sleep 1
+                                for game_choice in "${selected_full_items[@]}"; do
+                                    local name=$(echo "$game_choice" | cut -d'|' -f2)
+                                    mkdir -p "$(dirname "$DOWNLOAD_HISTORY_LOG")"
+                                    echo "[$(date '+%Y-%m-%d %H:%M:%S')] - [$console_name] - $name" >> "$DOWNLOAD_HISTORY_LOG"
+                                done
                                 if [[ "$AUTO_EXTRACT" == "yes" ]]; then
-                                    extract_archive "$DOWNLOAD_DIR/$name"
+                                    for game_choice in "${selected_full_items[@]}"; do
+                                        extract_archive "$DOWNLOAD_DIR/$(basename "$(echo "$game_choice" | cut -d'|' -f2)")"
+                                    done
                                 fi
-                                verify_file_integrity "$DOWNLOAD_DIR/$name"
-                            fi # End of if wget successful
-                        done
-                    fi
+                                echo -e "${C_GREEN}Alle Hintergrund-Downloads dieser Sitzung sind abgeschlossen.${C_RESET}"
+                            else
+                                echo -e "${HEADLINE_COLOR}-----------------------------------------------------------------${C_RESET}"
+                                for game_choice in "${selected_full_items[@]}"; do
+                                    path=$(echo "$game_choice" | cut -d'|' -f1)
+                                    name=$(echo "$game_choice" | cut -d'|' -f2)
+                                    echo -e "${HEADLINE_COLOR}-----------------------------------------------------------------${C_RESET}"
+                                    gum style --border normal --padding "0 1" --border-foreground 212 "Starte Download für: $(gum style --bold "$name")"
+                                    if wget -q -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" --show-progress "${BASE_URL}${path}"; then
+                                        gum style --foreground 10 "Download von '$name' abgeschlossen."
+                                        # Protokolliere den erfolgreichen Download
+                                        mkdir -p "$(dirname "$DOWNLOAD_HISTORY_LOG")"
+                                        echo "[$(date '+%Y-%m-%d %H:%M:%S')] - [$console_name] - $name" >> "$DOWNLOAD_HISTORY_LOG"
+                                        # Lösche die Log-Datei, falls eine durch einen vorherigen fehlgeschlagenen Versuch existiert
+                                        rm -f "$PROJECT_ROOT/logs/$(basename "$name").log" 2>/dev/null
+                                        if [[ "$AUTO_EXTRACT" == "yes" ]]; then
+                                            extract_archive "$DOWNLOAD_DIR/$name"
+                                        fi
+                                        verify_file_integrity "$DOWNLOAD_DIR/$name"
+                                    fi # End of if wget successful
+                                done
+                            fi
+                            ;;
+                        "Zur Merkliste hinzufügen")
+                            add_to_watchlist "$console_name" "${selected_full_items[@]}"
+                            ;;
+                        "Abbrechen")
+                            continue
+                            ;;
+                    esac
                 fi
             fi
         done # Ende der Spielesuche-Schleife

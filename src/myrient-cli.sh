@@ -51,16 +51,16 @@ DOWNLOAD_QUEUE_FILE="$PROJECT_ROOT/config/.download_queue"
 QUEUE_LOCK_FILE="$PROJECT_ROOT/config/.queue.lock"
 
 # --- Farben ---
-C_RESET='\033[0m'
-C_RED='\033[0;31m'
-C_GREEN='\033[0;32m'
-C_YELLOW='\033[0;33m'
-C_BLUE='\033[0;34m'
-C_PURPLE='\033[0;35m'
-C_CYAN='\033[0;36m'
-C_WHITE='\033[1;37m'
-C_GRAY='\033[0;90m'
-C_BOLD='\033[1m'
+C_RESET=$'\033[0m'
+C_RED=$'\033[0;31m'
+C_GREEN=$'\033[0;32m'
+C_YELLOW=$'\033[0;33m'
+C_BLUE=$'\033[0;34m'
+C_PURPLE=$'\033[0;35m'
+C_CYAN=$'\033[0;36m'
+C_WHITE=$'\033[1;37m'
+C_GRAY=$'\033[0;90m'
+C_BOLD=$'\033[1m'
 HEADLINE_COLOR="$C_CYAN" # Standard-Überschriftenfarbe
 
 # Funktion zur Dekodierung von URL-kodierten Zeichen (z.B. %20 -> Leerzeichen)
@@ -1272,7 +1272,7 @@ show_main_menu() {
 
 # Hauptfunktion des Skripts
 main() {
-    check_dependencies wget curl md5sum sha1sum bc unzip 7z gum
+    check_dependencies wget curl md5sum sha1sum bc unzip 7z gum fzf
     
     # Rufe die IP-Informationen einmalig beim Start ab
     fetch_ip_info
@@ -1698,7 +1698,7 @@ search_and_download_games() {
             done
 
             local selections
-            selections=$(printf '%s\n' "${display_results[@]}" | gum filter --no-limit --placeholder "Spiele auswählen (Leertaste) und mit Enter bestätigen...")
+            selections=$(printf '%s\n' "${display_results[@]}" | fzf --multi --ansi --prompt="Spiele auswählen (Tab) und mit Enter bestätigen > ")
 
             if [[ -n "$selections" ]]; then
                 local selected_full_items=()
@@ -1706,7 +1706,7 @@ search_and_download_games() {
                 for line in "${selected_lines[@]}"; do
                     # Extrahiere den reinen Dateinamen, um den ursprünglichen Eintrag zu finden
                     local clean_name
-                    clean_name=$(echo "$line" | sed -e 's/^\[.\] //' -e 's/ ([^)]*)$//')
+                    clean_name=$(echo "$line" | sed -r 's/\x1B\[[0-9;]*[mK]//g' | sed -e 's/^\[.\] //' -e 's/ \([^)]*\)$//')
                     # Finde den passenden Eintrag in den ursprünglichen Ergebnissen
                     local original_entry
                     original_entry=$(printf '%s\n' "${game_results[@]}" | grep -F -- "|$clean_name|")

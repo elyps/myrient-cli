@@ -24,7 +24,7 @@ echo "3. Testing current sed parsing logic..."
 # Replicating the sed command from get_links
 cat raw_page.html | \
 sed -n -e '/<tr/!d' -e '/class="link"/!d' \
--e 's/.*<a href="\([^"]*\)".*>\([^<]*\)<\/a>.*<td class="size">\([^<]*\)<\/td>.*/\1|\2|\3/p' > parsed_links.txt
+-e 's/.*<a href="\([^"]*\)"[^>]*>\([^<]*\)<\/a><\/td><td class="size">\([^<]*\)<\/td>.*/\1|\2|\3/p' > parsed_links.txt
 
 echo "4. Parsed results (first 10 lines):"
 head -n 10 parsed_links.txt

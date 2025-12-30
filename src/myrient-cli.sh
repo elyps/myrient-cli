@@ -46,6 +46,9 @@ IP_LOCATION="" # Globale Variable für den Standort
 DOWNLOAD_SPEED_LIMIT="0" # Standardmäßig keine Begrenzung (0 = unbegrenzt) 
 DOWNLOAD_HISTORY_LOG="$PROJECT_ROOT/logs/.download_history" # Protokoll für abgeschlossene Downloads
 RE_DOWNLOAD_POLICY="ask" # Richtlinie für erneute Downloads: ask, always, skip
+WATCHLIST_FILE="$PROJECT_ROOT/config/.watchlist"
+DOWNLOAD_QUEUE_FILE="$PROJECT_ROOT/config/.download_queue"
+QUEUE_LOCK_FILE="$PROJECT_ROOT/config/.queue.lock"
 
 # --- Farben ---
 C_RESET='\033[0m'
@@ -77,7 +80,7 @@ get_links() {
     # - s/.../p; extrahiert den href-Wert und den Link-Text.
     curl -s "${BASE_URL}${current_path}" | \
         sed -n -e '/<tr/!d' -e '/class="link"/!d' \
-        -e 's/.*<a href="\([^"]*\)"[^>]*>\([^<]*\)<\/a><\/td><td class="size">\([^<]*\)<\/td>.*/\1|\2|\3/p' | \
+        -e 's/.*<a href="\([^"]*\)".*>\([^<]*\)<\/a>.*<td class="size">\([^<]*\)<\/td>.*/\1|\2|\3/p' | \
         while IFS='|' read -r encoded_path display_name size; do
             # Filtere Navigations-Links heraus
             if [[ "$display_name" != "./" && "$display_name" != "../" && "$display_name" != "Parent directory/" ]]; then
@@ -1217,12 +1220,14 @@ show_main_menu() {
     # WICHTIG: Alle Optionen müssen VOR den Flags (--height etc.) stehen.
     gum choose \
         "Spiele-Download starten" \
+        "Merkliste verwalten" \
         " " \
         "Download-Einstellungen" \
         "──────────────────────" \
         "Download-Verzeichnis festlegen" \
         "Anzahl gleichzeitiger Downloads" \
         "Download-Geschwindigkeit" \
+        "Download-Warteschlange anzeigen" \
         "Richtlinie für erneute Downloads" \
         " " \
         "Such- & Filtereinstellungen" \
@@ -1262,7 +1267,7 @@ show_main_menu() {
         "Haftungsausschluss widerrufen" \
         "Über das Skript" \
         "Beenden" \
-        --cursor-prefix "  " --header ""
+        --cursor-prefix "  " --header "" --height 50
 }
 
 # Hauptfunktion des Skripts
@@ -1302,6 +1307,7 @@ main() {
 
         case $choice in
             "Spiele-Download starten") select_console_and_download ;;
+            "Merkliste verwalten") manage_watchlist ;;
             "Download-Verzeichnis festlegen") set_download_directory ;;
             "Anzahl gleichzeitiger Downloads") set_max_downloads ;;
             "Download-Geschwindigkeit") set_download_speed_limit ;;
@@ -1318,6 +1324,7 @@ main() {
             "Veraltete Backups löschen") cleanup_backups ;;
             "Konfiguration zurücksetzen") reset_config ;;
             "Laufende Downloads anzeigen") show_background_downloads ;;
+            "Download-Warteschlange anzeigen") show_queue_status ;;
             "Gesamtgröße der Downloads") show_total_download_size ;;
             "Download-Verlauf anzeigen") show_download_history ;;
             "Doppelte Einträge im Verlauf entfernen") deduplicate_download_history ;;
@@ -1332,6 +1339,230 @@ main() {
             *) continue ;; # Handle empty selection or invalid choice
         esac
     done
+}
+
+# Funktion zum Hinzufügen von Spielen zur Merkliste
+add_to_watchlist() {
+    local console_name="$1"
+    shift # Entfernt das erste Argument (console_name), der Rest sind die Spiele
+    local games_to_add=("$@")
+    local added_count=0
+    local skipped_count=0
+
+    if [ ${#games_to_add[@]} -eq 0 ]; then
+        return
+    fi
+
+    mkdir -p "$(dirname "$WATCHLIST_FILE")"
+    touch "$WATCHLIST_FILE"
+
+    for game_entry in "${games_to_add[@]}"; do
+        # Format: path|name|size
+        # Wir fügen den Konsolennamen hinzu: path|name|size|console_name
+        local name
+        name=$(echo "$game_entry" | cut -d'|' -f2)
+        
+        # Prüfen, ob das Spiel (anhand des Namens) bereits auf der Liste steht
+        if grep -q -F -- "|$name|" "$WATCHLIST_FILE"; then
+            ((skipped_count++))
+        else
+            echo "${game_entry}|${console_name}" >> "$WATCHLIST_FILE"
+            ((added_count++))
+        fi
+    done
+
+    if [ "$added_count" -gt 0 ]; then
+        gum style --foreground 10 "$added_count Spiel(e) zur Merkliste hinzugefügt."
+    fi
+    if [ "$skipped_count" -gt 0 ]; then
+        gum style --foreground 212 "$skipped_count Spiel(e) war(en) bereits auf der Merkliste."
+    fi
+    sleep 2
+}
+
+# Funktion zum Verwalten der Merkliste
+manage_watchlist() {
+    while true; do
+        if [ ! -s "$WATCHLIST_FILE" ]; then
+            gum style --border normal --margin 1 --padding 1 "Deine Merkliste ist leer."
+            gum spin --title "Kehre zum Hauptmenü zurück..." -- sleep 2
+            return
+        fi
+
+        mapfile -t watchlist_items < <(sort "$WATCHLIST_FILE")
+
+        local display_items=()
+        for item in "${watchlist_items[@]}"; do
+            local name size console
+            name=$(echo "$item" | cut -d'|' -f2)
+            size=$(echo "$item" | cut -d'|' -f3)
+            console=$(echo "$item" | cut -d'|' -f4)
+            display_items+=("$name ($console) - [$size]")
+        done
+
+        clear
+        gum style --border double --margin "1" --padding "1" --border-foreground 51 "Meine Merkliste"
+
+        local selections
+        selections=$(printf '%s\n' "${display_items[@]}" | gum filter --no-limit --placeholder "Spiele auswählen (Leertaste) und mit Enter bestätigen...")
+
+        if [[ -z "$selections" ]]; then
+            return
+        fi
+
+        local selected_full_items=()
+        mapfile -t selected_lines < <(echo "$selections")
+        for line in "${selected_lines[@]}"; do
+            local clean_name
+            clean_name=$(echo "$line" | sed -E 's/ \([^)]+\) - \[[^]]+\]$//')
+            local original_entry
+            original_entry=$(printf '%s\n' "${watchlist_items[@]}" | grep -F -- "|$clean_name|")
+            selected_full_items+=("$original_entry")
+        done
+
+        local action
+        action=$(gum choose "Ausgewählte herunterladen" "Ausgewählte entfernen" "Alles herunterladen" "Merkliste leeren" "Zurück")
+
+        case "$action" in
+            "Ausgewählte herunterladen"|"Alles herunterladen")
+                local items_to_queue=("${selected_full_items[@]}")
+                if [[ "$action" == "Alles herunterladen" ]]; then
+                    items_to_queue=("${watchlist_items[@]}")
+                fi
+
+                if [ ${#items_to_queue[@]} -gt 0 ]; then
+                    printf '%s\n' "${items_to_queue[@]}" >> "$DOWNLOAD_QUEUE_FILE"
+                    process_download_queue &
+                    gum style --foreground 10 "${#items_to_queue[@]} Spiel(e) zur Download-Warteschlange hinzugefügt."
+                    sleep 2
+                fi
+                ;;
+            "Ausgewählte entfernen")
+                if [ ${#selected_full_items[@]} -gt 0 ]; then
+                    local temp_file
+                    temp_file=$(mktemp)
+                    grep -vFf <(printf '%s\n' "${selected_full_items[@]}") "$WATCHLIST_FILE" > "$temp_file"
+                    mv "$temp_file" "$WATCHLIST_FILE"
+                    gum style --foreground 10 "${#selected_full_items[@]} Spiel(e) von der Merkliste entfernt."
+                    sleep 2
+                fi
+                ;;
+            "Merkliste leeren")
+                if gum confirm "Möchten Sie die gesamte Merkliste wirklich leeren?"; then
+                    > "$WATCHLIST_FILE"
+                    gum style --foreground 10 "Merkliste wurde geleert."
+                    sleep 2
+                    return
+                fi
+                ;;
+            "Zurück")
+                continue
+                ;;
+        esac
+    done
+}
+
+# Funktion zum sequenziellen Abarbeiten der Download-Warteschlange im Hintergrund
+process_download_queue() {
+    # Lock-Mechanismus, um zu verhindern, dass der Prozess mehrfach läuft
+    if [ -f "$QUEUE_LOCK_FILE" ]; then
+        return
+    fi
+    touch "$QUEUE_LOCK_FILE"
+    trap 'rm -f "$QUEUE_LOCK_FILE"' EXIT
+
+    while [ -s "$DOWNLOAD_QUEUE_FILE" ]; do
+        local game_entry
+        game_entry=$(head -n 1 "$DOWNLOAD_QUEUE_FILE")
+        
+        local path name size console_name
+        path=$(echo "$game_entry" | cut -d'|' -f1)
+        name=$(echo "$game_entry" | cut -d'|' -f2)
+        size=$(echo "$game_entry" | cut -d'|' -f3)
+        console_name=$(echo "$game_entry" | cut -d'|' -f4)
+
+        local log_file="$PROJECT_ROOT/logs/$(basename "$name").log"
+        
+        # wget im Vordergrund (innerhalb dieses Hintergrund-Skripts) ausführen
+        if wget -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" -o "$log_file" --progress=bar:force:noscroll "${BASE_URL}${path}"; then
+            # Erfolgreich: Aus Warteschlange und Merkliste entfernen
+            local temp_file=$(mktemp)
+            tail -n +2 "$DOWNLOAD_QUEUE_FILE" > "$temp_file" && mv "$temp_file" "$DOWNLOAD_QUEUE_FILE"
+            
+            local temp_watchlist=$(mktemp)
+            grep -vF -- "$game_entry" "$WATCHLIST_FILE" > "$temp_watchlist" && mv "$temp_watchlist" "$WATCHLIST_FILE"
+
+            # Protokollieren
+            mkdir -p "$(dirname "$DOWNLOAD_HISTORY_LOG")"
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] - [$console_name] - $name" >> "$DOWNLOAD_HISTORY_LOG"
+            
+            # Verifizieren und Entpacken
+            verify_file_integrity "$DOWNLOAD_DIR/$name"
+            if [[ "$AUTO_EXTRACT" == "yes" ]]; then
+                extract_archive "$DOWNLOAD_DIR/$name"
+            fi
+        else
+            # Fehler: Nur aus Warteschlange entfernen, aber auf Merkliste lassen
+            local temp_file=$(mktemp)
+            tail -n +2 "$DOWNLOAD_QUEUE_FILE" > "$temp_file" && mv "$temp_file" "$DOWNLOAD_QUEUE_FILE"
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] - FAILED - [$console_name] - $name" >> "$PROJECT_ROOT/logs/failed_downloads.log"
+        fi
+    done
+}
+
+# Funktion zum Anzeigen des Warteschlangen-Status
+show_queue_status() {
+    gum style --border normal --margin "1" --padding "1" --border-foreground 212 "Download-Warteschlange"
+
+    if [ ! -s "$DOWNLOAD_QUEUE_FILE" ]; then
+        gum style --padding "1" "Die Warteschlange ist leer."
+    else
+        local current_download
+        current_download=$(head -n 1 "$DOWNLOAD_QUEUE_FILE")
+        local name size
+        name=$(echo "$current_download" | cut -d'|' -f2)
+        size=$(echo "$current_download" | cut -d'|' -f3)
+        
+        gum style "Aktueller Download: $(gum style --bold "$name ($size)")"
+        
+        local log_file="$PROJECT_ROOT/logs/$(basename "$name").log"
+        if [ -f "$log_file" ]; then
+            local last_line
+            last_line=$(tail -n 1 "$log_file" 2>/dev/null | tr -d '\r')
+            local progress speed eta
+            progress=$(echo "$last_line" | sed -n 's/.* \([0-9]\+%\).*/\1/p' | sed 's/%//g')
+            progress=${progress:-0}
+            speed=$(echo "$last_line" | sed -n 's/.* \([0-9.,]*[KMGT]B\/s\).*/\1/p')
+            speed=${speed:-"N/A"}
+            eta=$(echo "$last_line" | sed -n 's/.*eta \([0-9ms h]*\).*/\1/p')
+            eta=${eta:-"N/A"}
+            
+            gum style "Fortschritt:"
+            gum progress --width 50 --show-percentage --percentage "$progress"
+            gum style "Geschwindigkeit: $speed | Verbleibend: $eta"
+        else
+            gum style "Warte auf Start des Downloads..."
+        fi
+
+        local queue_count
+        queue_count=$(wc -l < "$DOWNLOAD_QUEUE_FILE")
+        if [ "$queue_count" -gt 1 ]; then
+            local remaining_count=$((queue_count - 1))
+            gum style "\n$(gum style --bold "$remaining_count") weitere(s) Spiel(e) in der Warteschlange:"
+            tail -n +2 "$DOWNLOAD_QUEUE_FILE" | awk -F'|' '{print "  - " $2 " (" $4 ")"}' | head -n 5
+            if [ "$remaining_count" -gt 5 ]; then
+                echo "  ..."
+            fi
+        fi
+    fi
+    
+    if [ -f "$QUEUE_LOCK_FILE" ]; then
+        gum style --foreground 10 "\nDer Warteschlangen-Prozess ist aktiv."
+    else
+        gum style --foreground 212 "\nDer Warteschlangen-Prozess ist nicht aktiv."
+    fi
+
+    gum spin --title "Kehre zum Hauptmenü zurück..." -- sleep 4
 }
 
 select_console_and_download() {
@@ -1351,7 +1582,7 @@ select_console_and_download() {
     display_names=$(printf '%s\n' "${consoles[@]}" | cut -d'|' -f2)
 
     local console_display_name
-    console_display_name=$(printf '%s\n' "$display_names" | gum filter --placeholder "Konsole auswählen...")
+    console_display_name=$(printf '%s\n' "$display_names" | gum filter --placeholder "Konsole auswählen..." --no-limit)
 
     if [[ -z "$console_display_name" ]]; then
         return # User pressed escape

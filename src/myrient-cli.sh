@@ -333,7 +333,28 @@ cleanup_stale_logs() {
 }
 # Funktion zur Überprüfung von Abhängigkeiten
 check_dependencies() {
-    for cmd in "gum" "$@"; do
+    # Check for 'gum' first, as it is needed for the UI of this script.
+    if ! command -v "gum" &> /dev/null; then
+        echo -e "${C_YELLOW}Warnung: Das benötigte Programm 'gum' ist nicht installiert.${C_RESET}"
+        read -r -p "Möchten Sie 'gum' jetzt automatisch installieren? [y/N] " response
+        if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+            install_package "gum"
+            if ! command -v "gum" &> /dev/null; then
+                echo -e "${C_RED}Fehler: Installation von 'gum' fehlgeschlagen. Bitte installieren Sie es manuell von https://github.com/charmbracelet/gum${C_RESET}" >&2
+                exit 1
+            fi
+        else
+            echo -e "${C_RED}Fehler: 'gum' wird für dieses Skript benötigt.${C_RESET}" >&2
+            echo -e "${C_CYAN}Bitte installieren Sie 'gum' von https://github.com/charmbracelet/gum${C_RESET}" >&2
+            exit 1
+        fi
+    fi
+
+    # Now verify other dependencies using gum for the UI
+    for cmd in "$@"; do
+        # We already checked gum, helpful to skip if passed in args
+        if [[ "$cmd" == "gum" ]]; then continue; fi
+
         if ! command -v "$cmd" &> /dev/null; then
             if gum confirm "Warnung: Das benötigte Programm '$cmd' ist nicht installiert. Jetzt installieren?"; then
                 install_package "$cmd"
@@ -344,9 +365,6 @@ check_dependencies() {
                 fi
             else
                 echo -e "${C_RED}Fehler: '$cmd' ist für die Ausführung des Skripts erforderlich.${C_RESET}" >&2
-                if [[ "$cmd" == "gum" ]]; then
-                    echo -e "${C_CYAN}Bitte installieren Sie 'gum' von https://github.com/charmbracelet/gum${C_RESET}" >&2
-                fi
                 exit 1
             fi
         fi

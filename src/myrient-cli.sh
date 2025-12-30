@@ -1005,27 +1005,27 @@ extract_archive() {
 
     case "$filename" in
         *.zip)
-            echo "ZIP-Archiv erkannt. Entpacke nach '$extract_dir'..."
-            mkdir -p "$extract_dir"
-            if unzip -o "$filepath" -d "$extract_dir"; then
-                echo -e "${C_GREEN}Entpacken erfolgreich.${C_RESET}"
+            if gum spin --title "Entpacke ZIP-Archiv nach '$extract_dir'..." -- bash -c "mkdir -p \"$extract_dir\" && unzip -q -o \"$filepath\" -d \"$extract_dir\""; then
+                gum style --foreground 10 "Entpacken erfolgreich."
                 if [[ "$DELETE_ARCHIVE_AFTER_EXTRACT" == "yes" ]]; then
-                    rm "$filepath" && echo -e "${C_GREEN}Archiv '$filename' wurde gelöscht.${C_RESET}"
+                    rm "$filepath" && gum style --foreground 10 "Archiv '$filename' wurde gelöscht."
                 fi
+            else
+                gum style --foreground 9 "Fehler beim Entpacken des ZIP-Archivs."
             fi
             ;;
         *.7z)
-            echo "7-Zip-Archiv erkannt. Entpacke nach '$extract_dir'..."
-            mkdir -p "$extract_dir"
-            if 7z x "$filepath" -o"$extract_dir" -y; then
-                echo -e "${C_GREEN}Entpacken erfolgreich.${C_RESET}"
+            if gum spin --title "Entpacke 7-Zip-Archiv nach '$extract_dir'..." -- bash -c "mkdir -p \"$extract_dir\" && 7z x \"$filepath\" -o\"$extract_dir\" -y > /dev/null"; then
+                 gum style --foreground 10 "Entpacken erfolgreich."
                 if [[ "$DELETE_ARCHIVE_AFTER_EXTRACT" == "yes" ]]; then
-                    rm "$filepath" && echo -e "${C_GREEN}Archiv '$filename' wurde gelöscht.${C_RESET}"
+                    rm "$filepath" && gum style --foreground 10 "Archiv '$filename' wurde gelöscht."
                 fi
+            else
+                 gum style --foreground 9 "Fehler beim Entpacken des 7-Zip-Archivs."
             fi
             ;;
         *)
-            echo "Kein unterstütztes Archivformat (.zip, .7z) für '$filename' gefunden."
+            gum style --foreground 212 "Kein unterstütztes Archivformat (.zip, .7z) für '$filename' gefunden."
             ;;
     esac
 }
@@ -1509,9 +1509,10 @@ search_and_download_games() {
                         for game_choice in "${games_to_download_paths[@]}"; do
                             path=$(echo "$game_choice" | cut -d'|' -f1)
                             name=$(echo "$game_choice" | cut -d'|' -f2)
-                            echo -e "${C_CYAN}Starte Download für: ${C_WHITE}$name${C_RESET}"
+                            echo -e "${HEADLINE_COLOR}-----------------------------------------------------------------${C_RESET}"
+                            gum style --border normal --padding "0 1" --border-foreground 212 "Starte Download für: $(gum style --bold "$name")"
                             if wget -q -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" --show-progress "${BASE_URL}${path}"; then
-                                echo -e "${C_GREEN}Download von '$name' abgeschlossen.${C_RESET}"
+                                gum style --foreground 10 "Download von '$name' abgeschlossen."
                                 # Protokolliere den erfolgreichen Download
                                 mkdir -p "$(dirname "$DOWNLOAD_HISTORY_LOG")"
                                 echo "[$(date '+%Y-%m-%d %H:%M:%S')] - [$console_name] - $name" >> "$DOWNLOAD_HISTORY_LOG"

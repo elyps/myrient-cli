@@ -1058,14 +1058,15 @@ extract_archive() {
     case "$filename" in
         *.zip)
             if [[ "$silent" == "silent" ]]; then
-                 echo "Entpacke ZIP-Archiv nach '$extract_dir'..."
+                 echo "STATUS: Entpacke ZIP-Archiv..."
                  if bash -c "mkdir -p \"$extract_dir\" && unzip -q -o \"$filepath\" -d \"$extract_dir\""; then
-                    echo "Entpacken erfolgreich."
+                    echo "STATUS: Entpacken erfolgreich."
                     if [[ "$DELETE_ARCHIVE_AFTER_EXTRACT" == "yes" ]]; then
+                        echo "STATUS: Lösche Archiv..."
                         rm "$filepath" && echo "Archiv '$filename' wurde gelöscht."
                     fi
                  else
-                    echo "Fehler beim Entpacken des ZIP-Archivs."
+                    echo "STATUS: Fehler beim Entpacken."
                  fi
             else
                 if gum spin --title "Entpacke ZIP-Archiv nach '$extract_dir'..." -- bash -c "mkdir -p \"$extract_dir\" && unzip -q -o \"$filepath\" -d \"$extract_dir\""; then
@@ -1080,14 +1081,16 @@ extract_archive() {
             ;;
         *.7z)
             if [[ "$silent" == "silent" ]]; then
-                 echo "Entpacke 7-Zip-Archiv nach '$extract_dir'..."
-                 if bash -c "mkdir -p \"$extract_dir\" && 7z x \"$filepath\" -o\"$extract_dir\" -y > /dev/null"; then
-                    echo "Entpacken erfolgreich."
+                 echo "STATUS: Bereite Entpacken vor..."
+                 # Verwende -bsp1 für Fortschrittsausgabe in 7z
+                 if bash -c "mkdir -p \"$extract_dir\" && 7z x \"$filepath\" -o\"$extract_dir\" -y -bsp1"; then
+                    echo "STATUS: Entpacken erfolgreich."
                     if [[ "$DELETE_ARCHIVE_AFTER_EXTRACT" == "yes" ]]; then
+                        echo "STATUS: Lösche Archiv..."
                         rm "$filepath" && echo "Archiv '$filename' wurde gelöscht."
                     fi
                  else
-                     echo "Fehler beim Entpacken des 7-Zip-Archivs."
+                     echo "STATUS: Fehler beim Entpacken."
                  fi
             else
                 if gum spin --title "Entpacke 7-Zip-Archiv nach '$extract_dir'..." -- bash -c "mkdir -p \"$extract_dir\" && 7z x \"$filepath\" -o\"$extract_dir\" -y > /dev/null"; then
@@ -1587,7 +1590,6 @@ process_download_queue() {
                 verify_file_integrity "$DOWNLOAD_DIR/$name" "silent" >> "$log_file" 2>&1
                 
                 if [[ "$AUTO_EXTRACT" == "yes" ]]; then
-                    echo "STATUS: Spiel wird entpackt..." >> "$log_file"
                     extract_archive "$DOWNLOAD_DIR/$name" "silent" >> "$log_file" 2>&1
                 fi
                 
@@ -1662,11 +1664,28 @@ show_queue_status() {
                     progress=100
                     speed="-"
                     eta="-"
-                    gum style --foreground 10 "Status: $state_text"
                     
-                    # Manuelle Progress Bar für 100%
-                    local bar="████████████████████████████████████████" # 40 chars
-                    gum join --horizontal "$(gum style --foreground 10 "[$bar]")" "  100%"
+                    # Wenn wir Fortschritt in der Statuszeile haben (von 7z -bsp1)
+                    if [[ "$state_text" =~ ([0-9]+)% ]]; then
+                        progress="${BASH_REMATCH[1]}"
+                    fi
+
+                    gum style --foreground 10 "Status: $state_text"
+                elif [[ "$last_line" =~ ([0-9]+)% ]]; then
+                    # Universeller Parser für Fortschritt in der letzten Zeile (7z -bsp1 gibt Zeilen wie " 10%" aus)
+                    progress="${BASH_REMATCH[1]}"
+                    speed="-"
+                    eta="-"
+                    state_text="Wird entpackt..."
+                    
+                    # Suche nach der letzten "STATUS:" Zeile vor dem Fortschritt, um den Kontext zu kennen
+                    local context
+                    context=$(grep "STATUS:" "$log_file" | tail -n 1)
+                    if [[ -n "$context" ]]; then
+                        state_text="${context#STATUS: }"
+                    fi
+                    
+                    gum style "Status: $state_text"
                 else
                     progress=$(echo "$last_line" | sed -n 's/.* \([0-9]\+%\).*/\1/p' | sed 's/%//g')
                     progress=${progress:-0}
@@ -1677,20 +1696,25 @@ show_queue_status() {
                     state_text="Wird heruntergeladen..."
                     
                     gum style "Status: $state_text"
-                    
-                    # Manuelle Progress Bar Berechnung (Ersatz für 'gum bar', da nicht überall verfügbar)
-                    local bar_width=40
-                    local filled_len=$(echo "($progress * $bar_width) / 100" | bc)
-                    local empty_len=$((bar_width - filled_len))
-                    local bar=""
-                    if [ "$filled_len" -gt 0 ]; then
-                        bar=$(printf "%0.s█" $(seq 1 $filled_len))
-                    fi
-                    if [ "$empty_len" -gt 0 ]; then
-                        bar="${bar}$(printf "%0.s░" $(seq 1 $empty_len))"
-                    fi
-                    
-                    gum join --horizontal "$(gum style --foreground 212 "[$bar]")" "  $progress%"
+                fi
+
+                # Manuelle Progress Bar Berechnung
+                local bar_width=40
+                local filled_len=$(echo "($progress * $bar_width) / 100" | bc)
+                local empty_len=$((bar_width - filled_len))
+                local bar=""
+                if [ "$filled_len" -gt 0 ]; then
+                    bar=$(printf "%0.s█" $(seq 1 $filled_len))
+                fi
+                if [ "$empty_len" -gt 0 ]; then
+                    bar="${bar}$(printf "%0.s░" $(seq 1 $empty_len))"
+                fi
+                
+                local bar_color=212
+                if [[ "$progress" -eq 100 ]]; then bar_color=10; fi
+                
+                gum join --horizontal "$(gum style --foreground "$bar_color" "[$bar]")" "  $progress%"
+                if [[ "$state_text" == "Wird heruntergeladen..." ]]; then
                     gum style "Geschwindigkeit: $speed | Verbleibend: $eta"
                 fi
             else

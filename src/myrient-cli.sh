@@ -1655,7 +1655,7 @@ show_queue_status() {
             local log_file="$PROJECT_ROOT/logs/$(basename "$name").log"
             if [ -f "$log_file" ]; then
                 local last_line
-                last_line=$(tail -n 1 "$log_file" 2>/dev/null | tr -d '\r')
+                last_line=$(tail -n 1 "$log_file" 2>/dev/null | tr -d '\0\r')
                 
                 local progress speed eta state_text
 
@@ -1679,8 +1679,7 @@ show_queue_status() {
                     state_text="Wird entpackt..."
                     
                     # Suche nach der letzten "STATUS:" Zeile vor dem Fortschritt, um den Kontext zu kennen
-                    local context
-                    context=$(grep "STATUS:" "$log_file" | tail -n 1)
+                    context=$(grep -a "STATUS:" "$log_file" | tail -n 1 | tr -d '\0')
                     if [[ -n "$context" ]]; then
                         state_text="${context#STATUS: }"
                     fi

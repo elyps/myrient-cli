@@ -176,13 +176,10 @@ show_background_downloads() {
             eta=$(echo "$last_line" | sed -n 's/.*eta \([0-9ms h]*\).*/\1/p')
             eta=${eta:-"N/A"}
 
-            # Erstelle eine Zeile für die Tabelle und eine Fortschrittsanzeige
-            local progress_bar
-            progress_bar=$(gum progress --width 20 --show-percentage --percentage "$progress")
-            table_rows+=("$filename,$progress_bar,$speed,$eta")
+            table_rows+=("$filename,${progress}%,$speed,$eta")
         done
         # Zeige die Tabelle an
-        gum table --separator="," --widths="auto,25,15,15" "${table_rows[@]}"
+        gum table --separator="," --widths="auto,10,15,15" "${table_rows[@]}"
     fi
     gum spin --title "Kehre zum Hauptmenü zurück..." -- sleep 4
 }
@@ -1364,10 +1361,10 @@ add_to_watchlist() {
         
         # Prüfen, ob das Spiel (anhand des Namens) bereits auf der Liste steht
         if grep -q -F -- "|$name|" "$WATCHLIST_FILE"; then
-            ((skipped_count++))
+            ((skipped_count+=1))
         else
             echo "${game_entry}|${console_name}" >> "$WATCHLIST_FILE"
-            ((added_count++))
+            ((added_count+=1))
         fi
     done
 
@@ -1404,12 +1401,10 @@ manage_watchlist() {
         gum style --border double --margin "1" --padding "1" --border-foreground 51 "Meine Merkliste"
 
         local selections
-        selections=$(printf '%s\n' "${display_items[@]}" | gum filter --no-limit --placeholder "Spiele auswählen (Leertaste) und mit Enter bestätigen...")
+        selections=$(printf '%s\n' "${display_items[@]}" | gum filter --no-limit --placeholder "Spiele auswählen (Leertaste) und mit Enter bestätigen..." || true)
 
-        if [[ -z "$selections" ]]; then
-            return
-        fi
-
+        if [[ -z "$selections" ]]; then return; fi
+        
         local selected_full_items=()
         mapfile -t selected_lines < <(echo "$selections")
         for line in "${selected_lines[@]}"; do
@@ -1421,7 +1416,7 @@ manage_watchlist() {
         done
 
         local action
-        action=$(gum choose "Ausgewählte herunterladen" "Ausgewählte entfernen" "Alles herunterladen" "Merkliste leeren" "Zurück")
+        action=$(gum choose "Ausgewählte herunterladen" "Ausgewählte entfernen" "Alles herunterladen" "Merkliste leeren" "Zurück" || true)
 
         case "$action" in
             "Ausgewählte herunterladen"|"Alles herunterladen")
@@ -1432,9 +1427,14 @@ manage_watchlist() {
 
                 if [ ${#items_to_queue[@]} -gt 0 ]; then
                     printf '%s\n' "${items_to_queue[@]}" >> "$DOWNLOAD_QUEUE_FILE"
-                    process_download_queue &
+                    # Starte den Prozessor nur, wenn er nicht bereits läuft
+                    if [ ! -f "$QUEUE_LOCK_FILE" ]; then
+                        process_download_queue &
+                    fi
                     gum style --foreground 10 "${#items_to_queue[@]} Spiel(e) zur Download-Warteschlange hinzugefügt."
-                    sleep 2
+                    # Springe zur Warteschlangen-Ansicht und kehre dann zum Hauptmenü zurück
+                    show_queue_status
+                    break
                 fi
                 ;;
             "Ausgewählte entfernen")
@@ -1457,6 +1457,9 @@ manage_watchlist() {
                 ;;
             "Zurück")
                 continue
+                ;;
+            *) # Bei Abbruch (ESC) oder leerer Auswahl
+                return
                 ;;
         esac
     done
@@ -1538,7 +1541,9 @@ show_queue_status() {
             eta=${eta:-"N/A"}
             
             gum style "Fortschritt:"
-            gum progress --width 50 --show-percentage --percentage "$progress"
+            local bar_value
+            bar_value=$(printf "%.2f" "$(echo "$progress / 100" | bc -l)")
+            gum join --horizontal "$(gum bar --width 40 --value "$bar_value")" "  $progress%"
             gum style "Geschwindigkeit: $speed | Verbleibend: $eta"
         else
             gum style "Warte auf Start des Downloads..."
@@ -1698,24 +1703,29 @@ search_and_download_games() {
             done
 
             local selections
-            selections=$(printf '%s\n' "${display_results[@]}" | fzf --multi --ansi --prompt="Spiele auswählen (Tab) und mit Enter bestätigen > ")
+            selections=$(printf '%s\n' "${display_results[@]}" | fzf --multi --ansi --prompt="Spiele auswählen (Tab) und mit Enter bestätigen > " || true)
 
             if [[ -n "$selections" ]]; then
                 local selected_full_items=()
                 mapfile -t selected_lines < <(echo "$selections")
                 for line in "${selected_lines[@]}"; do
                     # Extrahiere den reinen Dateinamen, um den ursprünglichen Eintrag zu finden
-                    local clean_name
-                    clean_name=$(echo "$line" | sed -r 's/\x1B\[[0-9;]*[mK]//g' | sed -e 's/^\[.\] //' -e 's/ \([^)]*\)$//')
+                    # sed 1: Entfernt ANSI-Farbcodes.
+                    # sed 2: Entfernt das Präfix (z.B. "[✔] ").
+                    # sed 3: Entfernt das Suffix (z.B. " (123 MiB)").
+                    local clean_name 
+                    clean_name=$(echo "$line" | sed -e "s/$(printf '\033')\\[[0-9;]*[mK]//g" -e 's/^. //' -e 's/ ([^)]*)$//')
                     # Finde den passenden Eintrag in den ursprünglichen Ergebnissen
-                    local original_entry
-                    original_entry=$(printf '%s\n' "${game_results[@]}" | grep -F -- "|$clean_name|")
-                    selected_full_items+=("$original_entry")
+                    local original_entry=""
+                    original_entry=$(printf '%s\n' "${game_results[@]}" | grep -F -- "|$clean_name|" || true)
+                    if [[ -n "$original_entry" ]]; then
+                        selected_full_items+=("$original_entry")
+                    fi
                 done
 
                 if [ ${#selected_full_items[@]} -gt 0 ]; then
                     local action
-                    action=$(gum choose "Herunterladen" "Zur Merkliste hinzufügen" "Abbrechen")
+                    action=$(gum choose "Herunterladen" "Zur Merkliste hinzufügen" "Abbrechen" || true)
 
                     case "$action" in
                         "Herunterladen")
@@ -1727,7 +1737,7 @@ search_and_download_games() {
                                     if [[ $count -ge $MAX_CONCURRENT_DOWNLOADS ]]; then
                                         echo -e "${C_CYAN}Warte auf einen freien Download-Slot...${C_RESET}"
                                         wait -n
-                                        ((count--))
+                                        ((count-=1))
                                     fi
                                     local path name
                                     path=$(echo "$game_choice" | cut -d'|' -f1)
@@ -1738,7 +1748,7 @@ search_and_download_games() {
 
                                     echo -e "${C_CYAN}Starte Hintergrund-Download für: ${C_WHITE}$name${C_RESET}" 
                                     wget -b -c -P "$DOWNLOAD_DIR" --limit-rate="$DOWNLOAD_SPEED_LIMIT" --progress=bar:force:noscroll -o "$log_file" -- "${BASE_URL}${path}" &
-                                    ((count++))
+                                    ((count+=1))
                                 done
                                 echo "Alle Downloads wurden in die Warteschlange gestellt. Warten bis alle fertig sind..."
                                 wait # Warte auf alle Hintergrundprozesse in dieser Schleife

@@ -1097,6 +1097,7 @@ perform_self_update() {
     local new_script_url="${base_url}/src/myrient-cli.sh" # Korrigierter Pfad
     local new_version_url="${base_url}/src/VERSION"
     local temp_script_path="$SCRIPT_DIR/myrient-cli.sh.tmp"
+    local version_path="$SCRIPT_DIR/VERSION"
 
     echo "Lade neues Skript von $new_script_url herunter..."
 

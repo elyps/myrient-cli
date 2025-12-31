@@ -1679,7 +1679,8 @@ show_queue_status() {
                     state_text="Wird entpackt..."
                     
                     # Suche nach der letzten "STATUS:" Zeile vor dem Fortschritt, um den Kontext zu kennen
-                    context=$(grep -a "STATUS:" "$log_file" | tail -n 1 | tr -d '\0')
+                    local context
+                    context=$(grep -a "STATUS:" "$log_file" | tail -n 1 | tr -d '\0' || true)
                     if [[ -n "$context" ]]; then
                         state_text="${context#STATUS: }"
                     fi

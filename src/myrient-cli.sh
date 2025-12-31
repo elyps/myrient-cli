@@ -601,6 +601,23 @@ toggle_auto_verify() {
     gum spin --title "Kehre zum Hauptmenü zurück..." -- sleep 1
 }
 
+# Funktion zum Umschalten des automatischen Entpackens
+toggle_auto_extract() {
+    local no_save="$1"
+    gum style --border normal --margin "1" --padding "1" --border-foreground 212 "Automatisches Entpacken umschalten"
+    if [[ "$AUTO_EXTRACT" == "yes" ]]; then
+        AUTO_EXTRACT="no"
+        gum style --foreground 9 "Automatisches Entpacken nach dem Download ist jetzt DEAKTIVIERT."
+    else
+        AUTO_EXTRACT="yes"
+        gum style --foreground 10 "Automatisches Entpacken nach dem Download ist jetzt AKTIVIERT."
+    fi
+    if [[ "$no_save" != "no_save" ]]; then
+        save_config "suppress_message"
+    fi
+    gum spin --title "Kehre zum Hauptmenü zurück..." -- sleep 1
+}
+
 cleanup_backups() {
     gum style --border normal --margin "1" --padding "1" --border-foreground 212 "Veraltete Backups löschen"
     mapfile -t backup_files < <(find "$PROJECT_ROOT/backups" -maxdepth 1 -type f -name "$(basename "$CONFIG_FILE").*.bak" | sort -r)
@@ -1542,6 +1559,9 @@ process_download_queue() {
     # This block runs in a subshell due to the redirection, which is fine.
     {
         while [ -s "$DOWNLOAD_QUEUE_FILE" ]; do
+            # Lade Konfiguration neu, um auf Änderungen während des Laufs zu reagieren
+            load_config
+            
             # Prüfen auf Pause-Status
             if [ -f "$QUEUE_PAUSE_FILE" ]; then
                 sleep 2
@@ -1567,7 +1587,7 @@ process_download_queue() {
                 verify_file_integrity "$DOWNLOAD_DIR/$name" "silent" >> "$log_file" 2>&1
                 
                 if [[ "$AUTO_EXTRACT" == "yes" ]]; then
-                    echo "STATUS: Extracting..." >> "$log_file"
+                    echo "STATUS: Spiel wird entpackt..." >> "$log_file"
                     extract_archive "$DOWNLOAD_DIR/$name" "silent" >> "$log_file" 2>&1
                 fi
                 
@@ -1677,15 +1697,10 @@ show_queue_status() {
                 gum style "Warte auf Start..."
             fi
 
-            local queue_count
-            queue_count=$(wc -l < "$DOWNLOAD_QUEUE_FILE")
             if [ "$queue_count" -gt 1 ]; then
                 local remaining_count=$((queue_count - 1))
-                gum style "\n$(gum style --bold "$remaining_count") weitere(s) Spiel(e) in der Warteschlange:"
-                tail -n +2 "$DOWNLOAD_QUEUE_FILE" | awk -F'|' '{print "  - " $2 " (" $4 ")"}' | head -n 5
-                if [ "$remaining_count" -gt 5 ]; then
-                    echo "  ..."
-                fi
+                echo -e "\n$(gum style --bold "$remaining_count") weitere(s) Spiel(e) in der Warteschlange:"
+                tail -n +2 "$DOWNLOAD_QUEUE_FILE" | awk -F'|' '{print "  - " $2 " (" $4 ")"}'
             fi
         fi
         
@@ -1952,10 +1967,12 @@ search_and_download_games() {
                                         echo "[$(date '+%Y-%m-%d %H:%M:%S')] - [$console_name] - $name" >> "$DOWNLOAD_HISTORY_LOG"
                                         # Lösche die Log-Datei, falls eine durch einen vorherigen fehlgeschlagenen Versuch existiert
                                         rm -f "$PROJECT_ROOT/logs/$(basename "$name").log" 2>/dev/null
+                                        
+                                        verify_file_integrity "$DOWNLOAD_DIR/$name"
+                                        
                                         if [[ "$AUTO_EXTRACT" == "yes" ]]; then
                                             extract_archive "$DOWNLOAD_DIR/$name"
                                         fi
-                                        verify_file_integrity "$DOWNLOAD_DIR/$name"
                                     fi # End of if wget successful
                                 done
                             fi

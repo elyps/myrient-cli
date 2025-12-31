@@ -1607,11 +1607,12 @@ process_download_queue() {
             return # Prozess läuft noch
         fi
     fi
-    echo $$ > "$QUEUE_LOCK_FILE"
+    echo $BASHPID > "$QUEUE_LOCK_FILE"
     trap 'rm -f "$QUEUE_LOCK_FILE"' EXIT
 
     # Redirect all output/error to a debug log
     {
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Processor started (PID: $BASHPID)"
         deduplicate_queue
 
         while [ -s "$DOWNLOAD_QUEUE_FILE" ]; do
@@ -1664,14 +1665,15 @@ process_download_queue() {
                 # Protokollieren
                 mkdir -p "$(dirname "$DOWNLOAD_HISTORY_LOG")"
                 echo "[$(date '+%Y-%m-%d %H:%M:%S')] - [$console_name] - $name" >> "$DOWNLOAD_HISTORY_LOG"
-                
             else
                 # Fehler: Aus Warteschlange entfernen, aber auf Merkliste lassen
                 local temp_file=$(mktemp)
                 tail -n +2 "$DOWNLOAD_QUEUE_FILE" > "$temp_file" && mv "$temp_file" "$DOWNLOAD_QUEUE_FILE"
                 echo "[$(date '+%Y-%m-%d %H:%M:%S')] - FAILED - [$console_name] - $name" >> "$PROJECT_ROOT/logs/failed_downloads.log"
+                echo "STATUS: FEHLER: Download abgebrochen oder fehlgeschlagen." >> "$log_file"
             fi
         done
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Processor finished (Queue empty)"
     } > "$PROJECT_ROOT/logs/queue_processor_debug.log" 2>&1
 }
 
@@ -1698,11 +1700,12 @@ show_queue_status() {
             fi
         else
             # Starte den Prozessor nur, wenn er nicht bereits läuft
-            if [ ! -f "$QUEUE_LOCK_FILE" ]; then
+            if [ ! -f "$QUEUE_LOCK_FILE" ] || ! kill -0 $(cat "$QUEUE_LOCK_FILE" 2>/dev/null) 2>/dev/null; then
+                 # Sicherstellen, dass das alte Lock-File entfernt wird, falls der Prozess abgestürzt ist
+                 rm -f "$QUEUE_LOCK_FILE"
                  process_download_queue &
                  # Kurze Pause, damit der Prozess Zeit hat, das Lock-File zu erstellen
-                 # und den Status im Log zu aktualisieren
-                 sleep 1
+                 sleep 0.5
             fi
 
             local current_download
@@ -1818,7 +1821,12 @@ show_queue_status() {
         if [ -f "$QUEUE_PAUSE_FILE" ]; then
             status_msg="$(gum style --foreground 3 "PAUSIERT") - "
         fi
-        gum style --align center "${status_msg}$(gum style --foreground 212 "[p] Pause  [m] Verwalten  [c] Alles Abbrechen  [q] Zurück")"
+        
+        # Zeige einen blinkenden Indikator für "Aktivität"
+        local activity_info=" "
+        if (( $(date +%s) % 2 == 0 )); then activity_info="•"; fi
+        
+        gum style --align center "${status_msg}${activity_info} $(gum style --foreground 212 "[p] Pause  [m] Verwalten  [c] Alles Abbrechen  [q] Zurück")"
 
         tput ed # Lösche den Rest des Bildschirms
 

@@ -1671,9 +1671,8 @@ show_queue_status() {
             fi
         fi
         
-        # Check user input to exit
-        read -t 1 -n 1 key
-        if [[ $? -eq 0 ]]; then
+        # Check user input to exit (wrapped in if to avoid set -e termination on timeout)
+        if read -t 1 -n 1 key; then
             break
         fi
     done

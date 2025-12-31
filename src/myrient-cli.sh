@@ -49,6 +49,8 @@ RE_DOWNLOAD_POLICY="ask" # Richtlinie für erneute Downloads: ask, always, skip
 WATCHLIST_FILE="$PROJECT_ROOT/config/.watchlist"
 DOWNLOAD_QUEUE_FILE="$PROJECT_ROOT/config/.download_queue"
 QUEUE_LOCK_FILE="$PROJECT_ROOT/config/.queue.lock"
+QUEUE_PAUSE_FILE="$PROJECT_ROOT/config/.queue.pause"
+
 
 # --- Farben ---
 C_RESET=$'\033[0m'
@@ -1540,6 +1542,12 @@ process_download_queue() {
     # This block runs in a subshell due to the redirection, which is fine.
     {
         while [ -s "$DOWNLOAD_QUEUE_FILE" ]; do
+            # Prüfen auf Pause-Status
+            if [ -f "$QUEUE_PAUSE_FILE" ]; then
+                sleep 2
+                continue
+            fi
+
             local game_entry
             game_entry=$(head -n 1 "$DOWNLOAD_QUEUE_FILE")
             
@@ -1606,6 +1614,14 @@ show_queue_status() {
                  gum style --foreground 212 "Keine aktiven Downloads."
             fi
         else
+            # Starte den Prozessor nur, wenn er nicht bereits läuft
+            if [ ! -f "$QUEUE_LOCK_FILE" ]; then
+                 process_download_queue &
+                 # Kurze Pause, damit der Prozess Zeit hat, das Lock-File zu erstellen
+                 # und den Status im Log zu aktualisieren
+                 sleep 1
+            fi
+
             local current_download
             current_download=$(head -n 1 "$DOWNLOAD_QUEUE_FILE")
             local name size
@@ -1673,11 +1689,55 @@ show_queue_status() {
             fi
         fi
         
-        tput ed # Lösche den Rest des Bildschirms (verhindert Artefakte, wenn der Inhalt kürzer wird)
+        # Zeige Steuerungsoptionen an
+        local status_msg=""
+        if [ -f "$QUEUE_PAUSE_FILE" ]; then
+            status_msg="$(gum style --foreground 3 "PAUSIERT") - "
+        fi
+        gum style --align center "${status_msg}$(gum style --foreground 212 "[p] Pause/Weiter  [c] Abbrechen  [q] Zurück")"
 
-        # Check user input to exit (wrapped in if to avoid set -e termination on timeout)
+        tput ed # Lösche den Rest des Bildschirms
+
+        # Check user input
         if read -t 1 -n 1 key; then
-            break
+            case "$key" in
+                p|P)
+                    if [ -f "$QUEUE_PAUSE_FILE" ]; then
+                        rm "$QUEUE_PAUSE_FILE"
+                    else
+                        touch "$QUEUE_PAUSE_FILE"
+                    fi
+                    ;;
+                c|C)
+                    # Cursor wiederherstellen für gum confirm
+                    tput cnorm 
+                    tput cup $(tput lines) 0
+                    if gum confirm "Warteschlange wirklich abbrechen?" --affirmative="Ja" --negative="Nein"; then
+                        # Warteschlange leeren
+                        > "$DOWNLOAD_QUEUE_FILE"
+                        
+                        # Laufenden Download (wget) killen, falls vorhanden
+                        # Suche nach dem wget Prozess, der in das Log schreibt
+                         local pids
+                         pids=$(pgrep -f "wget -P $DOWNLOAD_DIR.*${BASE_URL}")
+                         if [ -n "$pids" ]; then
+                            kill $pids 2>/dev/null
+                         fi
+                         
+                        # Pause-Datei entfernen, falls vorhanden, damit der Prozess sauber aufräumen kann
+                        rm -f "$QUEUE_PAUSE_FILE"
+                        
+                        gum style --foreground 10 "Warteschlange wurde abgebrochen."
+                        sleep 1
+                        break
+                    fi
+                    # Cursor wieder verstecken
+                    tput civis
+                    ;;
+                q|Q|e|E) # e/E for potential typos or if someone thinks 'exit'
+                     break 
+                     ;;
+            esac
         fi
     done
     tput cnorm # Cursor wieder anzeigen

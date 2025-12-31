@@ -1697,6 +1697,8 @@ show_queue_status() {
                 gum style "Warte auf Start..."
             fi
 
+            local queue_count
+            queue_count=$(wc -l < "$DOWNLOAD_QUEUE_FILE")
             if [ "$queue_count" -gt 1 ]; then
                 local remaining_count=$((queue_count - 1))
                 echo -e "\n$(gum style --bold "$remaining_count") weitere(s) Spiel(e) in der Warteschlange:"

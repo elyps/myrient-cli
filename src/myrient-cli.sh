@@ -701,6 +701,7 @@ verify_file_integrity() {
         local expected_checksum
         expected_checksum=$(cut -d' ' -f1 < "$temp_checksum_file")
 
+        local result=0
         # cd in das Verzeichnis, da manche .md5/.sha1-Dateien nur den Dateinamen enthalten
         if (cd "$DOWNLOAD_DIR" && "${checksum_type}sum" -c <(echo "$expected_checksum  $filename") >/dev/null 2>&1); then
              if [[ "$silent" == "silent" ]]; then
@@ -714,9 +715,12 @@ verify_file_integrity() {
              else
                 gum style --foreground 9 "Verifikation FEHLGESCHLAGEN!"
              fi
+             result=1
         fi
         rm "$temp_checksum_file"
+        return $result
     fi
+    return 0
 }
 
 # Funktion zum Drucken einer horizontalen Linie über die gesamte Breite
@@ -1058,8 +1062,9 @@ extract_archive() {
     case "$filename" in
         *.zip)
             if [[ "$silent" == "silent" ]]; then
-                 echo "STATUS: Entpacke ZIP-Archiv..."
-                 if bash -c "mkdir -p \"$extract_dir\" && unzip -q -o \"$filepath\" -d \"$extract_dir\""; then
+                 echo "STATUS: Bereite Entpacken vor..."
+                 # Benutze 7z für ZIP-Archive im Silent-Mode, um Fortschritt zu haben
+                 if bash -c "mkdir -p \"$extract_dir\" && 7z x \"$filepath\" -o\"$extract_dir\" -y -bsp1"; then
                     echo "STATUS: Entpacken erfolgreich."
                     if [[ "$DELETE_ARCHIVE_AFTER_EXTRACT" == "yes" ]]; then
                         echo "STATUS: Lösche Archiv..."
@@ -1510,12 +1515,26 @@ manage_watchlist() {
                 fi
 
                 if [ ${#items_to_queue[@]} -gt 0 ]; then
-                    printf '%s\n' "${items_to_queue[@]}" >> "$DOWNLOAD_QUEUE_FILE"
+                    touch "$DOWNLOAD_QUEUE_FILE"
+                    local added_to_queue=0
+                    for item in "${items_to_queue[@]}"; do
+                        if ! grep -Fqx -- "$item" "$DOWNLOAD_QUEUE_FILE"; then
+                            echo "$item" >> "$DOWNLOAD_QUEUE_FILE"
+                            ((added_to_queue+=1))
+                        fi
+                    done
+                    
                     # Starte den Prozessor nur, wenn er nicht bereits läuft
                     if [ ! -f "$QUEUE_LOCK_FILE" ]; then
                         process_download_queue &
                     fi
-                    gum style --foreground 10 "${#items_to_queue[@]} Spiel(e) zur Download-Warteschlange hinzugefügt."
+                    
+                    if [ "$added_to_queue" -gt 0 ]; then
+                        gum style --foreground 10 "$added_to_queue Spiel(e) zur Download-Warteschlange hinzugefügt."
+                    else
+                        gum style --foreground 212 "Alle gewählten Spiele sind bereits in der Warteschlange."
+                    fi
+                    
                     # Springe zur Warteschlangen-Ansicht und kehre dann zum Hauptmenü zurück
                     show_queue_status
                     break
@@ -1561,6 +1580,12 @@ process_download_queue() {
     # Redirect all output/error to a debug log to prevent TUI corruption
     # This block runs in a subshell due to the redirection, which is fine.
     {
+        # Automatische Deduplizierung der Warteschlange beim Start
+        if [ -s "$DOWNLOAD_QUEUE_FILE" ]; then
+            local temp_q=$(mktemp)
+            awk '!x[$0]++' "$DOWNLOAD_QUEUE_FILE" > "$temp_q" && mv "$temp_q" "$DOWNLOAD_QUEUE_FILE"
+        fi
+
         while [ -s "$DOWNLOAD_QUEUE_FILE" ]; do
             # Lade Konfiguration neu, um auf Änderungen während des Laufs zu reagieren
             load_config
@@ -1587,10 +1612,12 @@ process_download_queue() {
                 
                 # Update status for Dashboard
                 echo "STATUS: Verifying..." >> "$log_file"
-                verify_file_integrity "$DOWNLOAD_DIR/$name" "silent" >> "$log_file" 2>&1
-                
-                if [[ "$AUTO_EXTRACT" == "yes" ]]; then
-                    extract_archive "$DOWNLOAD_DIR/$name" "silent" >> "$log_file" 2>&1
+                if verify_file_integrity "$DOWNLOAD_DIR/$name" "silent" >> "$log_file" 2>&1; then
+                    if [[ "$AUTO_EXTRACT" == "yes" ]]; then
+                        extract_archive "$DOWNLOAD_DIR/$name" "silent" >> "$log_file" 2>&1
+                    fi
+                else
+                    echo "STATUS: FEHLER: Verifikation fehlgeschlagen." >> "$log_file"
                 fi
                 
                 echo "STATUS: Complete" >> "$log_file"
@@ -1662,8 +1689,6 @@ show_queue_status() {
                 if [[ "$last_line" == STATUS:* ]]; then
                     state_text="${last_line#STATUS: }"
                     progress=100
-                    speed="-"
-                    eta="-"
                     
                     # Wenn wir Fortschritt in der Statuszeile haben (von 7z -bsp1)
                     if [[ "$state_text" =~ ([0-9]+)% ]]; then
@@ -1672,17 +1697,27 @@ show_queue_status() {
 
                     gum style --foreground 10 "Status: $state_text"
                 elif [[ "$last_line" =~ ([0-9]+)% ]]; then
-                    # Universeller Parser für Fortschritt in der letzten Zeile (7z -bsp1 gibt Zeilen wie " 10%" aus)
+                    # Universeller Parser für Fortschritt in der letzten Zeile
                     progress="${BASH_REMATCH[1]}"
                     speed="-"
                     eta="-"
-                    state_text="Wird entpackt..."
                     
-                    # Suche nach der letzten "STATUS:" Zeile vor dem Fortschritt, um den Kontext zu kennen
+                    # Suche nach der letzten "STATUS:" Zeile, um den Kontext zu kennen
                     local context
                     context=$(grep -a "STATUS:" "$log_file" | tail -n 1 | tr -d '\0' || true)
                     if [[ -n "$context" ]]; then
                         state_text="${context#STATUS: }"
+                        # Wenn der Status selbst ein Fortschritt ist (z.B. "10%"), 
+                        # versuche den vorherigen Status für den Text zu finden
+                        if [[ "$state_text" =~ ^[0-9]+%$ ]]; then
+                             local prev_context
+                             prev_context=$(grep -a "STATUS:" "$log_file" | grep -v "[0-9]%" | tail -n 1 | tr -d '\0' || true)
+                             if [[ -n "$prev_context" ]]; then
+                                state_text="${prev_context#STATUS: }"
+                             fi
+                        fi
+                    else
+                        state_text="Wird heruntergeladen..."
                     fi
                     
                     gum style "Status: $state_text"

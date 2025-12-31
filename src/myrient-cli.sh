@@ -1508,47 +1508,33 @@ manage_watchlist() {
         action=$(gum choose "Ausgewählte herunterladen" "Ausgewählte entfernen" "Alles herunterladen" "Merkliste leeren" "Zurück" || true)
 
         case "$action" in
-            "Ausgewählte herunterladen"|"Alles herunterladen")
-                local items_to_queue=("${selected_full_items[@]}")
-                if [[ "$action" == "Alles herunterladen" ]]; then
-                    items_to_queue=("${watchlist_items[@]}")
-                fi
-
-                if [ ${#items_to_queue[@]} -gt 0 ]; then
-                    touch "$DOWNLOAD_QUEUE_FILE"
-                    local added_to_queue=0
-                    for item in "${items_to_queue[@]}"; do
-                        if ! grep -Fqx -- "$item" "$DOWNLOAD_QUEUE_FILE"; then
-                            echo "$item" >> "$DOWNLOAD_QUEUE_FILE"
-                            ((added_to_queue+=1))
-                        fi
-                    done
-                    
-                    # Starte den Prozessor nur, wenn er nicht bereits läuft
-                    if [ ! -f "$QUEUE_LOCK_FILE" ]; then
-                        process_download_queue &
-                    fi
-                    
-                    if [ "$added_to_queue" -gt 0 ]; then
-                        gum style --foreground 10 "$added_to_queue Spiel(e) zur Download-Warteschlange hinzugefügt."
-                    else
-                        gum style --foreground 212 "Alle gewählten Spiele sind bereits in der Warteschlange."
-                    fi
-                    
-                    # Springe zur Warteschlangen-Ansicht und kehre dann zum Hauptmenü zurück
+            "Ausgewählte herunterladen")
+                if [ ${#selected_full_items[@]} -gt 0 ]; then
+                    add_to_queue "${selected_full_items[@]}"
+                    local added=$?
+                    process_download_queue &
+                    [ "$added" -gt 0 ] && gum style --foreground 10 "$added Spiel(e) zur Download-Warteschlange hinzugefügt."
                     show_queue_status
                     break
                 fi
                 ;;
             "Ausgewählte entfernen")
                 if [ ${#selected_full_items[@]} -gt 0 ]; then
-                    local temp_file
-                    temp_file=$(mktemp)
-                    grep -vFf <(printf '%s\n' "${selected_full_items[@]}") "$WATCHLIST_FILE" > "$temp_file"
-                    mv "$temp_file" "$WATCHLIST_FILE"
-                    gum style --foreground 10 "${#selected_full_items[@]} Spiel(e) von der Merkliste entfernt."
-                    sleep 2
+                    for item in "${selected_full_items[@]}"; do
+                        local temp_watchlist=$(mktemp)
+                        grep -vF -- "$item" "$WATCHLIST_FILE" > "$temp_watchlist" && mv "$temp_watchlist" "$WATCHLIST_FILE"
+                        remove_from_queue "$item"
+                    done
+                    gum style --foreground 10 "${#selected_full_items[@]} Spiel(e) entfernt."
                 fi
+                ;;
+            "Alles herunterladen")
+                add_to_queue "${watchlist_items[@]}"
+                local added=$?
+                process_download_queue &
+                gum style --foreground 10 "$added Spiel(e) zur Download-Warteschlange hinzugefügt."
+                show_queue_status
+                break
                 ;;
             "Merkliste leeren")
                 if gum confirm "Möchten Sie die gesamte Merkliste wirklich leeren?"; then
@@ -1569,22 +1555,64 @@ manage_watchlist() {
 }
 
 # Funktion zum sequenziellen Abarbeiten der Download-Warteschlange im Hintergrund
-process_download_queue() {
-    # Lock-Mechanismus, um zu verhindern, dass der Prozess mehrfach läuft
-    if [ -f "$QUEUE_LOCK_FILE" ]; then
-        return
+# --- Warteschlangen-Hilfsfunktionen ---
+
+# Fügt Spiele zur Warteschlange hinzu (mit Deduplizierung)
+add_to_queue() {
+    local -a items=("$@")
+    mkdir -p "$(dirname "$DOWNLOAD_QUEUE_FILE")"
+    touch "$DOWNLOAD_QUEUE_FILE"
+    local added=0
+    for item in "${items[@]}"; do
+        if ! grep -Fqx -- "$item" "$DOWNLOAD_QUEUE_FILE" 2>/dev/null; then
+            echo "$item" >> "$DOWNLOAD_QUEUE_FILE"
+            ((added++))
+        fi
+    done
+    return $added
+}
+
+# Entfernt Spiele aus der Warteschlange
+remove_from_queue() {
+    local pattern="$1"
+    if [ -f "$DOWNLOAD_QUEUE_FILE" ]; then
+        local temp_q=$(mktemp)
+        grep -vF -- "$pattern" "$DOWNLOAD_QUEUE_FILE" > "$temp_q" || true
+        mv "$temp_q" "$DOWNLOAD_QUEUE_FILE"
     fi
-    touch "$QUEUE_LOCK_FILE"
+}
+
+# Reinigt die Warteschlange von Duplikaten
+deduplicate_queue() {
+    if [ -s "$DOWNLOAD_QUEUE_FILE" ]; then
+        local temp_q=$(mktemp)
+        awk '!x[$0]++' "$DOWNLOAD_QUEUE_FILE" > "$temp_q" && mv "$temp_q" "$DOWNLOAD_QUEUE_FILE"
+    fi
+}
+
+# Leert die gesamte Warteschlange
+clear_download_queue() {
+    > "$DOWNLOAD_QUEUE_FILE"
+    # Kill background wget processes
+    local pids=$(pgrep -f "wget -P $DOWNLOAD_DIR.*${BASE_URL}")
+    [ -n "$pids" ] && kill $pids 2>/dev/null
+    rm -f "$QUEUE_PAUSE_FILE" "$QUEUE_LOCK_FILE"
+}
+
+process_download_queue() {
+    # PID-basierter Lock-Mechanismus
+    if [ -f "$QUEUE_LOCK_FILE" ]; then
+        local lock_pid=$(cat "$QUEUE_LOCK_FILE")
+        if kill -0 "$lock_pid" 2>/dev/null; then
+            return # Prozess läuft noch
+        fi
+    fi
+    echo $$ > "$QUEUE_LOCK_FILE"
     trap 'rm -f "$QUEUE_LOCK_FILE"' EXIT
 
-    # Redirect all output/error to a debug log to prevent TUI corruption
-    # This block runs in a subshell due to the redirection, which is fine.
+    # Redirect all output/error to a debug log
     {
-        # Automatische Deduplizierung der Warteschlange beim Start
-        if [ -s "$DOWNLOAD_QUEUE_FILE" ]; then
-            local temp_q=$(mktemp)
-            awk '!x[$0]++' "$DOWNLOAD_QUEUE_FILE" > "$temp_q" && mv "$temp_q" "$DOWNLOAD_QUEUE_FILE"
-        fi
+        deduplicate_queue
 
         while [ -s "$DOWNLOAD_QUEUE_FILE" ]; do
             # Lade Konfiguration neu, um auf Änderungen während des Laufs zu reagieren
@@ -1607,6 +1635,10 @@ process_download_queue() {
 
             local log_file="$PROJECT_ROOT/logs/$(basename "$name").log"
             
+            # Log-Datei vorher leeren/vorbereiten, damit das Dashboard nicht auf alten Daten basiert
+            mkdir -p "$(dirname "$log_file")"
+            echo "STATUS: Download startet..." > "$log_file"
+
             # wget im Vordergrund (innerhalb dieses Hintergrund-Skripts) ausführen
             if wget -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" -o "$log_file" --progress=bar:force:noscroll "${BASE_URL}${path}"; then
                 
@@ -1623,8 +1655,7 @@ process_download_queue() {
                 echo "STATUS: Complete" >> "$log_file"
 
                 # Erfolgreich: Erst JETZT aus Warteschlange entfernen
-                local temp_file=$(mktemp)
-                tail -n +2 "$DOWNLOAD_QUEUE_FILE" > "$temp_file" && mv "$temp_file" "$DOWNLOAD_QUEUE_FILE"
+                remove_from_queue "$game_entry"
                 
                 # Auch aus Merkliste entfernen
                 local temp_watchlist=$(mktemp)
@@ -1650,6 +1681,9 @@ show_queue_status() {
     tput civis
     trap 'tput cnorm' EXIT
     clear # Einmaliges Leeren des Bildschirms vor der Schleife
+
+    # Dedupliziere die Warteschlange beim Öffnen des Dashboards
+    deduplicate_queue
 
     while true; do
         tput cup 0 0 # Cursor oben links positionieren (verhindert Flackern durch 'clear')
@@ -1696,8 +1730,19 @@ show_queue_status() {
                     fi
 
                     gum style --foreground 10 "Status: $state_text"
+                elif [[ "$last_line" =~ ([0-9]+%) ]] && [[ "$last_line" =~ (eta|s$|B/s) ]]; then
+                    # Eindeutige Erkennung von wget Fortschritt
+                    progress=$(echo "$last_line" | sed -n 's/.* \([0-9]\+%\).*/\1/p' | sed 's/%//g')
+                    progress=${progress:-0}
+                    speed=$(echo "$last_line" | sed -n 's/.* \([0-9.,-]*[KMGT]*B\/s\).*/\1/p')
+                    speed=${speed:-"N/A"}
+                    eta=$(echo "$last_line" | sed -n 's/.*eta \([0-9ms h]*\).*/\1/p')
+                    eta=${eta:-"N/A"}
+                    state_text="Wird heruntergeladen..."
+                    
+                    gum style "Status: $state_text"
                 elif [[ "$last_line" =~ ([0-9]+)% ]]; then
-                    # Universeller Parser für Fortschritt in der letzten Zeile
+                    # Universeller Parser für Fortschritt in der letzten Zeile (z.B. Entpacken)
                     progress="${BASH_REMATCH[1]}"
                     speed="-"
                     eta="-"
@@ -1717,19 +1762,22 @@ show_queue_status() {
                              fi
                         fi
                     else
-                        state_text="Wird heruntergeladen..."
+                        state_text="In Bearbeitung..."
                     fi
                     
                     gum style "Status: $state_text"
                 else
-                    progress=$(echo "$last_line" | sed -n 's/.* \([0-9]\+%\).*/\1/p' | sed 's/%//g')
-                    progress=${progress:-0}
-                    speed=$(echo "$last_line" | sed -n 's/.* \([0-9.,]*[KMGT]B\/s\).*/\1/p')
-                    speed=${speed:-"N/A"}
-                    eta=$(echo "$last_line" | sed -n 's/.*eta \([0-9ms h]*\).*/\1/p')
-                    eta=${eta:-"N/A"}
-                    state_text="Wird heruntergeladen..."
+                    progress=0
+                    speed="-"
+                    eta="-"
+                    state_text="Initialisiere..."
                     
+                    # Suche nach der letzten "STATUS:" Zeile
+                    local context
+                    context=$(grep -a "STATUS:" "$log_file" | tail -n 1 | tr -d '\0' || true)
+                    if [[ -n "$context" ]]; then
+                        state_text="${context#STATUS: }"
+                    fi
                     gum style "Status: $state_text"
                 fi
 
@@ -1770,7 +1818,7 @@ show_queue_status() {
         if [ -f "$QUEUE_PAUSE_FILE" ]; then
             status_msg="$(gum style --foreground 3 "PAUSIERT") - "
         fi
-        gum style --align center "${status_msg}$(gum style --foreground 212 "[p] Pause/Weiter  [c] Abbrechen  [q] Zurück")"
+        gum style --align center "${status_msg}$(gum style --foreground 212 "[p] Pause  [m] Verwalten  [c] Alles Abbrechen  [q] Zurück")"
 
         tput ed # Lösche den Rest des Bildschirms
 
@@ -1784,33 +1832,37 @@ show_queue_status() {
                         touch "$QUEUE_PAUSE_FILE"
                     fi
                     ;;
+                m|M|e|E)
+                    # Warteschlange manuell verwalten (einzelne Einträge löschen)
+                    tput cnorm
+                    local q_items=()
+                    mapfile -t q_items < <(cat "$DOWNLOAD_QUEUE_FILE")
+                    if [ ${#q_items[@]} -gt 0 ]; then
+                        local to_remove
+                        to_remove=$(printf '%s\n' "${q_items[@]}" | awk -F'|' '{print $2 " (" $4 ")"}' | gum filter --placeholder "Spiel(e) zum Entfernen auswählen..." --no-limit)
+                        if [[ -n "$to_remove" ]]; then
+                             while read -r line; do
+                                local clean_name=$(echo "$line" | sed 's/ ([^)]*)$//')
+                                local full_entry=$(printf '%s\n' "${q_items[@]}" | grep -F -- "|$clean_name|")
+                                remove_from_queue "$full_entry"
+                             done <<< "$to_remove"
+                        fi
+                    fi
+                    tput civis
+                    ;;
                 c|C)
                     # Cursor wiederherstellen für gum confirm
                     tput cnorm 
                     tput cup $(tput lines) 0
-                    if gum confirm "Warteschlange wirklich abbrechen?" --affirmative="Ja" --negative="Nein"; then
-                        # Warteschlange leeren
-                        > "$DOWNLOAD_QUEUE_FILE"
-                        
-                        # Laufenden Download (wget) killen, falls vorhanden
-                        # Suche nach dem wget Prozess, der in das Log schreibt
-                         local pids
-                         pids=$(pgrep -f "wget -P $DOWNLOAD_DIR.*${BASE_URL}")
-                         if [ -n "$pids" ]; then
-                            kill $pids 2>/dev/null
-                         fi
-                         
-                        # Pause-Datei entfernen, falls vorhanden, damit der Prozess sauber aufräumen kann
-                        rm -f "$QUEUE_PAUSE_FILE"
-                        
-                        gum style --foreground 10 "Warteschlange wurde abgebrochen."
+                    if gum confirm "GESAMTE Warteschlange wirklich abbrechen?" --affirmative="Ja" --negative="Nein"; then
+                        clear_download_queue
+                        gum style --foreground 10 "Warteschlange wurde geleert."
                         sleep 1
                         break
                     fi
-                    # Cursor wieder verstecken
                     tput civis
                     ;;
-                q|Q|e|E) # e/E for potential typos or if someone thinks 'exit'
+                q|Q)
                      break 
                      ;;
             esac

@@ -1591,9 +1591,10 @@ show_queue_status() {
     # Verstecke Cursor
     tput civis
     trap 'tput cnorm' EXIT
+    clear # Einmaliges Leeren des Bildschirms vor der Schleife
 
     while true; do
-        clear
+        tput cup 0 0 # Cursor oben links positionieren (verhindert Flackern durch 'clear')
         gum style --border normal --margin "1" --padding "1" --border-foreground 212 "Download-Dashboard" "Drücken Sie eine beliebige Taste, um zurückzukehren."
 
         if [ ! -s "$DOWNLOAD_QUEUE_FILE" ]; then
@@ -1671,6 +1672,8 @@ show_queue_status() {
             fi
         fi
         
+        tput ed # Lösche den Rest des Bildschirms (verhindert Artefakte, wenn der Inhalt kürzer wird)
+
         # Check user input to exit (wrapped in if to avoid set -e termination on timeout)
         if read -t 1 -n 1 key; then
             break

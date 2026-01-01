@@ -1511,7 +1511,7 @@ manage_watchlist() {
             "Ausgewählte herunterladen")
                 if [ ${#selected_full_items[@]} -gt 0 ]; then
                     add_to_queue "${selected_full_items[@]}"
-                    local added=$?
+                    local added=$QUEUE_ADD_COUNT
                     process_download_queue &
                     [ "$added" -gt 0 ] && gum style --foreground 10 "$added Spiel(e) zur Download-Warteschlange hinzugefügt."
                     show_queue_status
@@ -1530,7 +1530,7 @@ manage_watchlist() {
                 ;;
             "Alles herunterladen")
                 add_to_queue "${watchlist_items[@]}"
-                local added=$?
+                local added=$QUEUE_ADD_COUNT
                 process_download_queue &
                 gum style --foreground 10 "$added Spiel(e) zur Download-Warteschlange hinzugefügt."
                 show_queue_status
@@ -1558,18 +1558,19 @@ manage_watchlist() {
 # --- Warteschlangen-Hilfsfunktionen ---
 
 # Fügt Spiele zur Warteschlange hinzu (mit Deduplizierung)
+# Setzt QUEUE_ADD_COUNT auf die Anzahl der tatsächlich hinzugefügten Spiele
 add_to_queue() {
     local -a items=("$@")
+    QUEUE_ADD_COUNT=0
     mkdir -p "$(dirname "$DOWNLOAD_QUEUE_FILE")"
     touch "$DOWNLOAD_QUEUE_FILE"
-    local added=0
     for item in "${items[@]}"; do
         if ! grep -Fqx -- "$item" "$DOWNLOAD_QUEUE_FILE" 2>/dev/null; then
             echo "$item" >> "$DOWNLOAD_QUEUE_FILE"
-            ((added++))
+            ((QUEUE_ADD_COUNT+=1))
         fi
     done
-    return $added
+    return 0
 }
 
 # Entfernt Spiele aus der Warteschlange

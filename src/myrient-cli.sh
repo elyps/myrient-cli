@@ -1716,7 +1716,7 @@ show_queue_status() {
             name=$(echo "$current_download" | cut -d'|' -f2)
             size=$(echo "$current_download" | cut -d'|' -f3)
 
-            gum style "Aktive Aufgabe: $(gum style --bold "$name ($size)")"
+            gum style "Aktive Aufgabe: $(gum style --bold "$name ($size)$(tput el)")"
 
             local log_file="$PROJECT_ROOT/logs/$(basename "$name").log"
             if [ -f "$log_file" ]; then
@@ -1734,7 +1734,7 @@ show_queue_status() {
                         progress="${BASH_REMATCH[1]}"
                     fi
 
-                    gum style --foreground 10 "Status: $state_text"
+                    gum style --foreground 10 "Status: $(tput el)$state_text"
                 elif [[ "$last_line" =~ ([0-9]+%) ]] && [[ "$last_line" =~ (eta|s$|B/s) ]]; then
                     # Eindeutige Erkennung von wget Fortschritt
                     progress=$(echo "$last_line" | sed -n 's/.* \([0-9]\+%\).*/\1/p' | sed 's/%//g')
@@ -1745,7 +1745,7 @@ show_queue_status() {
                     eta=${eta:-"N/A"}
                     state_text="Wird heruntergeladen..."
                     
-                    gum style "Status: $state_text"
+                    gum style "Status: $(tput el)$state_text"
                 elif [[ "$last_line" =~ ([0-9]+)% ]]; then
                     # Universeller Parser für Fortschritt in der letzten Zeile (z.B. Entpacken)
                     progress="${BASH_REMATCH[1]}"
@@ -1770,7 +1770,7 @@ show_queue_status() {
                         state_text="In Bearbeitung..."
                     fi
                     
-                    gum style "Status: $state_text"
+                    gum style "Status: $(tput el)$state_text"
                 else
                     progress=0
                     speed="-"
@@ -1783,7 +1783,7 @@ show_queue_status() {
                     if [[ -n "$context" ]]; then
                         state_text="${context#STATUS: }"
                     fi
-                    gum style "Status: $state_text"
+                    gum style "Status: $(tput el)$state_text"
                 fi
 
                 # Manuelle Progress Bar Berechnung
@@ -1801,9 +1801,9 @@ show_queue_status() {
                 local bar_color=212
                 if [[ "$progress" -eq 100 ]]; then bar_color=10; fi
                 
-                gum join --horizontal "$(gum style --foreground "$bar_color" "[$bar]")" "  $progress%"
+                gum join --horizontal "$(gum style --foreground "$bar_color" "[$bar]")" "  $progress%$(tput el)"
                 if [[ "$state_text" == "Wird heruntergeladen..." ]]; then
-                    gum style "Geschwindigkeit: $speed | Verbleibend: $eta"
+                    gum style "Geschwindigkeit: $speed | Verbleibend: $eta$(tput el)"
                 fi
             else
                 gum style "Warte auf Start..."
@@ -1828,7 +1828,7 @@ show_queue_status() {
         local activity_info=" "
         if (( $(date +%s) % 2 == 0 )); then activity_info="•"; fi
         
-        gum style --align center "${status_msg}${activity_info} $(gum style --foreground 212 "[p] Pause  [m] Verwalten  [c] Alles Abbrechen  [q] Zurück")"
+        gum style --align center "${status_msg}${activity_info} $(gum style --foreground 212 "[p] Pause  [m] Verwalten  [c] Alles Abbrechen  [q] Zurück")$(tput el)"
 
         tput ed # Lösche den Rest des Bildschirms
 

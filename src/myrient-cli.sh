@@ -51,6 +51,7 @@ DOWNLOAD_QUEUE_FILE="$PROJECT_ROOT/config/.download_queue"
 QUEUE_LOCK_FILE="$PROJECT_ROOT/config/.queue.lock"
 QUEUE_PAUSE_FILE="$PROJECT_ROOT/config/.queue.pause"
 WGET_USER_AGENT="Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/115.0"
+DASHBOARD_REFRESH_INTERVAL=1
 
 
 # --- Farben ---
@@ -474,6 +475,7 @@ save_config() { # Akzeptiert ein optionales Argument, um die "Weiter"-Meldung zu
         echo "SEARCH_EXCLUDE_KEYWORDS=\"$SEARCH_EXCLUDE_KEYWORDS\""
         echo "DOWNLOAD_SPEED_LIMIT=\"$DOWNLOAD_SPEED_LIMIT\""
         echo "RE_DOWNLOAD_POLICY=\"$RE_DOWNLOAD_POLICY\""
+        echo "DASHBOARD_REFRESH_INTERVAL=$DASHBOARD_REFRESH_INTERVAL"
     } > "$CONFIG_FILE"
     echo -e "${C_GREEN}Einstellungen gespeichert.${C_RESET}"
 }
@@ -499,6 +501,7 @@ reset_config() {
             SEARCH_EXCLUDE_KEYWORDS="Demo Beta"
             DOWNLOAD_SPEED_LIMIT="0"
             RE_DOWNLOAD_POLICY="ask"
+            DASHBOARD_REFRESH_INTERVAL=1
             gum style --foreground 10 "Konfigurationsdatei entfernt und Einstellungen auf Standardwerte zurückgesetzt."
         else
             echo -e "${C_YELLOW}Vorgang abgebrochen.${C_RESET}"
@@ -1727,29 +1730,33 @@ show_queue_status() {
     # Dedupliziere die Warteschlange beim Öffnen des Dashboards
     deduplicate_queue
 
-    while true; do
-        tput cup 0 0 # Cursor oben links positionieren (verhindert Flackern durch 'clear')
-        gum style --border normal --margin "1" --padding "1" --border-foreground 212 "Download-Dashboard" "Drücken Sie eine beliebige Taste, um zurückzukehren."
+    # Zeichne statische Teile einmalig
+    gum style --border normal --margin "1" --padding "1" --border-foreground 212 "Download-Dashboard" "Drücken Sie [q] oder eine beliebige Auswahltaste zum Beenden."
+    
+    # Merke Startzeile für dynamischen Bereich (Header ist ca. 5-6 Zeilen hoch)
+    local dynamic_start_row=7
 
+    while true; do
+        tput cup "$dynamic_start_row" 0
+        
         if [ ! -s "$DOWNLOAD_QUEUE_FILE" ]; then
-            gum style --padding "1" "Die Warteschlange ist leer (oder Aufgaben abgeschlossen)."
             if [ -f "$QUEUE_LOCK_FILE" ]; then
-                 gum style --foreground 10 "Hintergrund-Prozess ist noch aktiv (schließt Abschlussarbeiten ab)..."
+                 printf "${C_GREEN}Hintergrund-Prozess ist noch aktiv (schließt Abschlussarbeiten ab)...$(tput el)\n"
             else
-                 gum style --foreground 212 "Keine aktiven Downloads."
+                 printf "${C_PURPLE}Die Warteschlange ist leer oder Aufgaben abgeschlossen.$(tput el)\n"
+                 printf "${C_PURPLE}Keine aktiven Downloads.$(tput el)\n"
             fi
+            # Lösche den Rest des Bildschirms unter der Meldung
+            tput ed
         else
             # Starte den Prozessor nur, wenn er nicht bereits läuft
             if [ ! -f "$QUEUE_LOCK_FILE" ] || ! kill -0 $(cat "$QUEUE_LOCK_FILE" 2>/dev/null) 2>/dev/null; then
-                 # Sicherstellen, dass das alte Lock-File entfernt wird, falls der Prozess abgestürzt ist
                  rm -f "$QUEUE_LOCK_FILE"
-                 
                  if validate_download_directory; then
                     process_download_queue &
-                    # Kurze Pause, damit der Prozess Zeit hat, das Lock-File zu erstellen
                     sleep 0.5
                  else
-                    break # Zurück zum Menü, wenn Pfad ungültig und abgebrochen
+                    break
                  fi
             fi
 
@@ -1759,7 +1766,7 @@ show_queue_status() {
             name=$(echo "$current_download" | cut -d'|' -f2)
             size=$(echo "$current_download" | cut -d'|' -f3)
 
-            gum style "Aktive Aufgabe: $(gum style --bold "$name ($size)$(tput el)")"
+            printf "Aktive Aufgabe: ${C_BOLD}%s (%s)${C_RESET}$(tput el)\n" "$name" "$size"
 
             local log_file="$PROJECT_ROOT/logs/$(basename "$name").log"
             if [ -f "$log_file" ]; then
@@ -1771,15 +1778,9 @@ show_queue_status() {
                 if [[ "$last_line" == STATUS:* ]]; then
                     state_text="${last_line#STATUS: }"
                     progress=100
-                    
-                    # Wenn wir Fortschritt in der Statuszeile haben (von 7z -bsp1)
-                    if [[ "$state_text" =~ ([0-9]+)% ]]; then
-                        progress="${BASH_REMATCH[1]}"
-                    fi
-
-                    gum style --foreground 10 "Status: $(tput el)$state_text"
+                    if [[ "$state_text" =~ ([0-9]+)% ]]; then progress="${BASH_REMATCH[1]}"; fi
+                    printf "${C_GREEN}Status: %-30s${C_RESET}$(tput el)\n" "$state_text"
                 elif [[ "$last_line" =~ ([0-9]+%) ]] && [[ "$last_line" =~ (eta|s$|B/s) ]]; then
-                    # Eindeutige Erkennung von wget Fortschritt
                     progress=$(echo "$last_line" | sed -n 's/.* \([0-9]\+%\).*/\1/p' | sed 's/%//g')
                     progress=${progress:-0}
                     speed=$(echo "$last_line" | sed -n 's/.* \([0-9.,-]*[KMGT]*B\/s\).*/\1/p')
@@ -1787,108 +1788,88 @@ show_queue_status() {
                     eta=$(echo "$last_line" | sed -n 's/.*eta \([0-9ms h]*\).*/\1/p')
                     eta=${eta:-"N/A"}
                     state_text="Wird heruntergeladen..."
-                    
-                    gum style "Status: $(tput el)$state_text"
+                    printf "Status: %-30s$(tput el)\n" "$state_text"
                 elif [[ "$last_line" =~ ([0-9]+)% ]]; then
-                    # Universeller Parser für Fortschritt in der letzten Zeile (z.B. Entpacken)
                     progress="${BASH_REMATCH[1]}"
-                    speed="-"
-                    eta="-"
-                    
-                    # Suche nach der letzten "STATUS:" Zeile, um den Kontext zu kennen
                     local context
-                    context=$(grep -a "STATUS:" "$log_file" | tail -n 1 | tr -d '\0' || true)
-                    if [[ -n "$context" ]]; then
-                        state_text="${context#STATUS: }"
-                        # Wenn der Status selbst ein Fortschritt ist (z.B. "10%"), 
-                        # versuche den vorherigen Status für den Text zu finden
-                        if [[ "$state_text" =~ ^[0-9]+%$ ]]; then
-                             local prev_context
-                             prev_context=$(grep -a "STATUS:" "$log_file" | grep -v "[0-9]%" | tail -n 1 | tr -d '\0' || true)
-                             if [[ -n "$prev_context" ]]; then
-                                state_text="${prev_context#STATUS: }"
-                             fi
-                        fi
-                    else
-                        state_text="In Bearbeitung..."
+                    context=$(grep -ao "STATUS:.*" "$log_file" | tail -n 1 | tr -d '\0' || true)
+                    state_text="${context#STATUS: }"
+                    if [[ "$state_text" =~ ^[0-9]+%$ ]]; then
+                         local prev_context
+                         prev_context=$(grep -ao "STATUS:.*" "$log_file" | grep -v "[0-9]%" | tail -n 1 | tr -d '\0' || true)
+                         [[ -n "$prev_context" ]] && state_text="${prev_context#STATUS: }"
                     fi
-                    
-                    gum style "Status: $(tput el)$state_text"
+                    [[ -z "$state_text" ]] && state_text="In Bearbeitung..."
+                    printf "Status: %-30s$(tput el)\n" "$state_text"
                 else
                     progress=0
-                    speed="-"
-                    eta="-"
-                    state_text="Initialisiere..."
-                    
-                    # Suche nach der letzten "STATUS:" Zeile
                     local context
-                    context=$(grep -a "STATUS:" "$log_file" | tail -n 1 | tr -d '\0' || true)
-                    if [[ -n "$context" ]]; then
-                        state_text="${context#STATUS: }"
-                    fi
-                    gum style "Status: $(tput el)$state_text"
+                    context=$(grep -ao "STATUS:.*" "$log_file" | tail -n 1 | tr -d '\0' || true)
+                    state_text="${context#STATUS: }"
+                    [[ -z "$state_text" ]] && state_text="Initialisiere..."
+                    printf "Status: %-30s$(tput el)\n" "$state_text"
                 fi
 
                 # Manuelle Progress Bar Berechnung
                 local bar_width=40
-                local filled_len=$(echo "($progress * $bar_width) / 100" | bc)
+                local filled_len=$(( (progress * bar_width) / 100 ))
                 local empty_len=$((bar_width - filled_len))
                 local bar=""
-                if [ "$filled_len" -gt 0 ]; then
-                    bar=$(printf "%0.s█" $(seq 1 $filled_len))
-                fi
-                if [ "$empty_len" -gt 0 ]; then
-                    bar="${bar}$(printf "%0.s░" $(seq 1 $empty_len))"
-                fi
+                [ "$filled_len" -gt 0 ] && bar=$(printf "%0.s█" $(seq 1 $filled_len))
+                [ "$empty_len" -gt 0 ] && bar="${bar}$(printf "%0.s░" $(seq 1 $empty_len))"
                 
-                local bar_color=212
-                if [[ "$progress" -eq 100 ]]; then bar_color=10; fi
+                local bar_color_code="\033[0;35m" # Pink-ish (212 equiv)
+                [[ "$progress" -eq 100 ]] && bar_color_code="${C_GREEN}"
                 
-                gum join --horizontal "$(gum style --foreground "$bar_color" "[$bar]")" "  $progress%$(tput el)"
+                printf "${bar_color_code}[%s]${C_RESET}  %3d%%$(tput el)\n" "$bar" "$progress"
+                
                 if [[ "$state_text" == "Wird heruntergeladen..." ]]; then
-                    gum style "Geschwindigkeit: $speed | Verbleibend: $eta$(tput el)"
+                    printf "Geschwindigkeit: %-10s | Verbleibend: %-10s$(tput el)\n" "$speed" "$eta"
+                else
+                    printf "$(tput el)\n"
                 fi
             else
-                gum style "Warte auf Start..."
+                printf "Warte auf Start...$(tput el)\n"
+                printf "$(tput el)\n"
+                printf "$(tput el)\n"
+                printf "$(tput el)\n"
             fi
 
             local queue_count
             queue_count=$(wc -l < "$DOWNLOAD_QUEUE_FILE")
             if [ "$queue_count" -gt 1 ]; then
                 local remaining_count=$((queue_count - 1))
-                echo -e "\n$(gum style --bold "$remaining_count") weitere(s) Spiel(e) in der Warteschlange:$(tput el)"
-                tail -n +2 "$DOWNLOAD_QUEUE_FILE" | awk -F'|' '{print "  - " $2 " (" $4 ")"}' | while read -r line; do
-                    echo -e "${line}$(tput el)"
+                printf "\n${C_BOLD}%d weitere(s) Spiel(e) in der Warteschlange:${C_RESET}$(tput el)\n" "$remaining_count"
+                tail -n +2 "$DOWNLOAD_QUEUE_FILE" | head -n 5 | awk -F'|' '{print "  - " $2 " (" $4 ")"}' | while read -r line; do
+                    printf "%s$(tput el)\n" "$line"
                 done
+                if [ "$queue_count" -gt 6 ]; then
+                    printf "  ... und %d weitere$(tput el)\n" $((queue_count - 6))
+                fi
+            else
+                # Lösche Bereich falls keine weiteren Items
+                tput ed
             fi
         fi
         
-        # Zeige Steuerungsoptionen an
+        # Zeige Steuerungsoptionen an fixierten Zeilen unten (oder relativ)
+        # Wir springen ans Ende des Bildschirms oder lassen etwas Platz
+        tput cup $(($(tput lines) - 2)) 0
         local status_msg=""
-        if [ -f "$QUEUE_PAUSE_FILE" ]; then
-            status_msg="$(gum style --foreground 3 "PAUSIERT") - "
-        fi
+        [ -f "$QUEUE_PAUSE_FILE" ] && status_msg="${C_YELLOW}PAUSIERT${C_RESET} - "
         
-        # Zeige einen blinkenden Indikator für "Aktivität"
         local activity_info=" "
-        if (( $(date +%s) % 2 == 0 )); then activity_info="•"; fi
+        (( $(date +%s) % 2 == 0 )) && activity_info="•"
         
-        gum style --align center "${status_msg}${activity_info} $(gum style --foreground 212 "[p] Pause  [m] Verwalten  [c] Alles Abbrechen  [q] Zurück")$(tput el)"
-
-        tput ed # Lösche den Rest des Bildschirms
+        printf "${status_msg}${activity_info} ${C_PURPLE}[p] Pause  [m] Verwalten  [c] Alles Abbrechen  [q] Zurück${C_RESET}$(tput el)"
 
         # Check user input
-        if read -t 1 -n 1 key; then
+        if read -t "$DASHBOARD_REFRESH_INTERVAL" -n 1 key; then
             case "$key" in
                 p|P)
-                    if [ -f "$QUEUE_PAUSE_FILE" ]; then
-                        rm "$QUEUE_PAUSE_FILE"
-                    else
-                        touch "$QUEUE_PAUSE_FILE"
-                    fi
+                    [ -f "$QUEUE_PAUSE_FILE" ] && rm "$QUEUE_PAUSE_FILE" || touch "$QUEUE_PAUSE_FILE"
                     ;;
                 m|M|e|E)
-                    # Warteschlange manuell verwalten (einzelne Einträge löschen)
                     tput cnorm
                     local q_items=()
                     mapfile -t q_items < <(cat "$DOWNLOAD_QUEUE_FILE")
@@ -1903,10 +1884,10 @@ show_queue_status() {
                              done <<< "$to_remove"
                         fi
                     fi
-                    tput civis
+                    tput civis; clear
+                    gum style --border normal --margin "1" --padding "1" --border-foreground 212 "Download-Dashboard" "Drücken Sie [q] oder eine beliebige Auswahltaste zum Beenden."
                     ;;
                 c|C)
-                    # Cursor wiederherstellen für gum confirm
                     tput cnorm 
                     tput cup $(tput lines) 0
                     if gum confirm "GESAMTE Warteschlange wirklich abbrechen?" --affirmative="Ja" --negative="Nein"; then
@@ -1915,11 +1896,10 @@ show_queue_status() {
                         sleep 1
                         break
                     fi
-                    tput civis
+                    tput civis; clear
+                    gum style --border normal --margin "1" --padding "1" --border-foreground 212 "Download-Dashboard" "Drücken Sie [q] oder eine beliebige Auswahltaste zum Beenden."
                     ;;
-                q|Q)
-                     break 
-                     ;;
+                q|Q) break ;;
             esac
         fi
     done

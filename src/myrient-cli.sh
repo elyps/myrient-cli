@@ -88,6 +88,8 @@ get_links() {
             # Filtere Navigations-Links heraus
             if [[ "$display_name" != "./" && "$display_name" != "../" && "$display_name" != "Parent directory/" ]]; then
                 # Ausgabe: Vollständiger KODIERTER Pfad | Anzeigename (bereits dekodiert) | Größe
+                # Bereinige name von Wagenrücklauf-Zeichen (\r)
+                display_name=$(echo "$display_name" | tr -d '\r')
                 echo "${current_path}${encoded_path}|${display_name}|${size}"
             fi
         done
@@ -143,6 +145,38 @@ set_download_directory() {
 
     save_config "suppress_message"
     gum spin --title "Einstellungen gespeichert. Kehre zum Hauptmenü zurück..." -- sleep 2
+}
+
+# Funktion zur Validierung des Download-Verzeichnisses vor dem Start
+validate_download_directory() {
+    while true; do
+        # Absolute Pfad-Expansion
+        local check_dir
+        eval check_dir="$DOWNLOAD_DIR"
+
+        if [[ -d "$check_dir" && -w "$check_dir" ]]; then
+            return 0
+        fi
+
+        clear
+        gum style --border double --margin "1" --padding "1" --border-foreground 9 "FEHLER: Download-Verzeichnis nicht erreichbar" \
+            "Der Pfad '$(gum style --bold "$DOWNLOAD_DIR")' existiert nicht oder ist nicht beschreibbar."
+
+        local choice
+        choice=$(gum choose "Pfad korrigieren" "Erneut versuchen" "Abbrechen")
+
+        case "$choice" in
+            "Pfad korrigieren")
+                set_download_directory
+                ;;
+            "Erneut versuchen")
+                continue
+                ;;
+            "Abbrechen")
+                return 1
+                ;;
+        esac
+    done
 }
 
 # Funktion zum Anzeigen laufender Hintergrund-Downloads
@@ -1511,12 +1545,14 @@ manage_watchlist() {
         case "$action" in
             "Ausgewählte herunterladen")
                 if [ ${#selected_full_items[@]} -gt 0 ]; then
-                    add_to_queue "${selected_full_items[@]}"
-                    local added=$QUEUE_ADD_COUNT
-                    process_download_queue &
-                    [ "$added" -gt 0 ] && gum style --foreground 10 "$added Spiel(e) zur Download-Warteschlange hinzugefügt."
-                    show_queue_status
-                    break
+                    if validate_download_directory; then
+                        add_to_queue "${selected_full_items[@]}"
+                        local added=$QUEUE_ADD_COUNT
+                        process_download_queue &
+                        [ "$added" -gt 0 ] && gum style --foreground 10 "$added Spiel(e) zur Download-Warteschlange hinzugefügt."
+                        show_queue_status
+                        break
+                    fi
                 fi
                 ;;
             "Ausgewählte entfernen")
@@ -1530,12 +1566,14 @@ manage_watchlist() {
                 fi
                 ;;
             "Alles herunterladen")
-                add_to_queue "${watchlist_items[@]}"
-                local added=$QUEUE_ADD_COUNT
-                process_download_queue &
-                gum style --foreground 10 "$added Spiel(e) zur Download-Warteschlange hinzugefügt."
-                show_queue_status
-                break
+                if validate_download_directory; then
+                    add_to_queue "${watchlist_items[@]}"
+                    local added=$QUEUE_ADD_COUNT
+                    process_download_queue &
+                    gum style --foreground 10 "$added Spiel(e) zur Download-Warteschlange hinzugefügt."
+                    show_queue_status
+                    break
+                fi
                 ;;
             "Merkliste leeren")
                 if gum confirm "Möchten Sie die gesamte Merkliste wirklich leeren?"; then
@@ -1705,9 +1743,14 @@ show_queue_status() {
             if [ ! -f "$QUEUE_LOCK_FILE" ] || ! kill -0 $(cat "$QUEUE_LOCK_FILE" 2>/dev/null) 2>/dev/null; then
                  # Sicherstellen, dass das alte Lock-File entfernt wird, falls der Prozess abgestürzt ist
                  rm -f "$QUEUE_LOCK_FILE"
-                 process_download_queue &
-                 # Kurze Pause, damit der Prozess Zeit hat, das Lock-File zu erstellen
-                 sleep 0.5
+                 
+                 if validate_download_directory; then
+                    process_download_queue &
+                    # Kurze Pause, damit der Prozess Zeit hat, das Lock-File zu erstellen
+                    sleep 0.5
+                 else
+                    break # Zurück zum Menü, wenn Pfad ungültig und abgebrochen
+                 fi
             fi
 
             local current_download
@@ -1813,8 +1856,10 @@ show_queue_status() {
             queue_count=$(wc -l < "$DOWNLOAD_QUEUE_FILE")
             if [ "$queue_count" -gt 1 ]; then
                 local remaining_count=$((queue_count - 1))
-                echo -e "\n$(gum style --bold "$remaining_count") weitere(s) Spiel(e) in der Warteschlange:"
-                tail -n +2 "$DOWNLOAD_QUEUE_FILE" | awk -F'|' '{print "  - " $2 " (" $4 ")"}'
+                echo -e "\n$(gum style --bold "$remaining_count") weitere(s) Spiel(e) in der Warteschlange:$(tput el)"
+                tail -n +2 "$DOWNLOAD_QUEUE_FILE" | awk -F'|' '{print "  - " $2 " (" $4 ")"}' | while read -r line; do
+                    echo -e "${line}$(tput el)"
+                done
             fi
         fi
         
@@ -2058,8 +2103,12 @@ search_and_download_games() {
                                     log_file="$PROJECT_ROOT/logs/$(basename "$name").log"
 
                                     echo -e "${C_CYAN}Starte Hintergrund-Download für: ${C_WHITE}$name${C_RESET}" 
-                                    wget --user-agent="$WGET_USER_AGENT" -b -c -P "$DOWNLOAD_DIR" --limit-rate="$DOWNLOAD_SPEED_LIMIT" --progress=bar:force:noscroll -o "$log_file" -- "${BASE_URL}${path}" &
-                                    ((count+=1))
+                                    if validate_download_directory; then
+                                        wget --user-agent="$WGET_USER_AGENT" -b -c -P "$DOWNLOAD_DIR" --limit-rate="$DOWNLOAD_SPEED_LIMIT" --progress=bar:force:noscroll -o "$log_file" -- "${BASE_URL}${path}" &
+                                        ((count+=1))
+                                    else
+                                        echo -e "${C_RED}Download für $name abgebrochen (Pfad ungültig).${C_RESET}"
+                                    fi
                                 done
                                 echo "Alle Downloads wurden in die Warteschlange gestellt. Warten bis alle fertig sind..."
                                 wait # Warte auf alle Hintergrundprozesse in dieser Schleife
@@ -2083,20 +2132,24 @@ search_and_download_games() {
                                     name=$(echo "$game_choice" | cut -d'|' -f2)
                                     echo -e "${HEADLINE_COLOR}-----------------------------------------------------------------${C_RESET}"
                                     gum style --border normal --padding "0 1" --border-foreground 212 "Starte Download für: $(gum style --bold "$name")"
-                                    if wget --user-agent="$WGET_USER_AGENT" -q -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" --show-progress "${BASE_URL}${path}"; then
-                                        gum style --foreground 10 "Download von '$name' abgeschlossen."
-                                        # Protokolliere den erfolgreichen Download
-                                        mkdir -p "$(dirname "$DOWNLOAD_HISTORY_LOG")"
-                                        echo "[$(date '+%Y-%m-%d %H:%M:%S')] - [$console_name] - $name" >> "$DOWNLOAD_HISTORY_LOG"
-                                        # Lösche die Log-Datei, falls eine durch einen vorherigen fehlgeschlagenen Versuch existiert
-                                        rm -f "$PROJECT_ROOT/logs/$(basename "$name").log" 2>/dev/null
-                                        
-                                        verify_file_integrity "$DOWNLOAD_DIR/$name"
-                                        
-                                        if [[ "$AUTO_EXTRACT" == "yes" ]]; then
-                                            extract_archive "$DOWNLOAD_DIR/$name"
-                                        fi
-                                    fi # End of if wget successful
+                                    if validate_download_directory; then
+                                        if wget --user-agent="$WGET_USER_AGENT" -q -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" --show-progress "${BASE_URL}${path}"; then
+                                            gum style --foreground 10 "Download von '$name' abgeschlossen."
+                                            # Protokolliere den erfolgreichen Download
+                                            mkdir -p "$(dirname "$DOWNLOAD_HISTORY_LOG")"
+                                            echo "[$(date '+%Y-%m-%d %H:%M:%S')] - [$console_name] - $name" >> "$DOWNLOAD_HISTORY_LOG"
+                                            # Lösche die Log-Datei, falls eine durch einen vorherigen fehlgeschlagenen Versuch existiert
+                                            rm -f "$PROJECT_ROOT/logs/$(basename "$name").log" 2>/dev/null
+                                            
+                                            verify_file_integrity "$DOWNLOAD_DIR/$name"
+                                            
+                                            if [[ "$AUTO_EXTRACT" == "yes" ]]; then
+                                                extract_archive "$DOWNLOAD_DIR/$name"
+                                            fi
+                                        fi # End of if wget successful
+                                    else
+                                        echo -e "${C_RED}Download für $name abgebrochen (Pfad ungültig).${C_RESET}"
+                                    fi
                                 done
                             fi
                             ;;

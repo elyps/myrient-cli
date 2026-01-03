@@ -727,11 +727,19 @@ verify_file_integrity() {
 
         if [[ "$silent" == "silent" ]]; then
             echo "Lade Prüfsummendatei herunter..."
-            wget -q -O "$temp_checksum_file" --limit-rate="$DOWNLOAD_SPEED_LIMIT" -- "${BASE_URL}${checksum_remote_path}"
+            if [[ "$DOWNLOAD_SPEED_LIMIT" != "0" && -n "$DOWNLOAD_SPEED_LIMIT" ]]; then
+                wget -q -O "$temp_checksum_file" --user-agent="$WGET_USER_AGENT" --limit-rate="$DOWNLOAD_SPEED_LIMIT" -- "${BASE_URL}${checksum_remote_path}"
+            else
+                wget -q -O "$temp_checksum_file" --user-agent="$WGET_USER_AGENT" -- "${BASE_URL}${checksum_remote_path}"
+            fi
              echo "Verifiziere Datei..."
         else
-            echo -e "${C_CYAN}Lade Prüfsummendatei herunter...${C_RESET}"        
-            gum spin --spinner dot --title "Lade Prüfsummendatei herunter..." -- wget -q -O "$temp_checksum_file" --limit-rate="$DOWNLOAD_SPEED_LIMIT" -- "${BASE_URL}${checksum_remote_path}"
+            echo -e "${C_CYAN}Lade Prüfsummendatei herunter...${C_RESET}"
+            if [[ "$DOWNLOAD_SPEED_LIMIT" != "0" && -n "$DOWNLOAD_SPEED_LIMIT" ]]; then
+                gum spin --spinner dot --title "Lade Prüfsummendatei herunter..." -- wget -q -O "$temp_checksum_file" --user-agent="$WGET_USER_AGENT" --limit-rate="$DOWNLOAD_SPEED_LIMIT" -- "${BASE_URL}${checksum_remote_path}"
+            else
+                gum spin --spinner dot --title "Lade Prüfsummendatei herunter..." -- wget -q -O "$temp_checksum_file" --user-agent="$WGET_USER_AGENT" -- "${BASE_URL}${checksum_remote_path}"
+            fi
             echo -e "${C_CYAN}Verifiziere Datei (dies kann dauern)...${C_RESET}"
         fi
 

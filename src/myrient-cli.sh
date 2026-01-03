@@ -1684,7 +1684,10 @@ process_download_queue() {
             echo "STATUS: Download startet..." > "$log_file"
 
             # wget im Vordergrund (innerhalb dieses Hintergrund-Skripts) ausführen
-            if wget --user-agent="$WGET_USER_AGENT" -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" -o "$log_file" --progress=bar:force:noscroll "${BASE_URL}${path}"; then
+            local wget_cmd=(wget --user-agent="$WGET_USER_AGENT" -P "$DOWNLOAD_DIR" -c)
+            [[ "$DOWNLOAD_SPEED_LIMIT" != "0" && -n "$DOWNLOAD_SPEED_LIMIT" ]] && wget_cmd+=(--limit-rate="$DOWNLOAD_SPEED_LIMIT")
+            wget_cmd+=(-o "$log_file" --progress=bar:force:noscroll "${BASE_URL}${path}")
+            if "${wget_cmd[@]}"; then
                 
                 # Update status for Dashboard
                 echo "STATUS: Verifying..." >> "$log_file"

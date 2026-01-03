@@ -1768,13 +1768,17 @@ show_queue_status() {
 
             printf "Aktive Aufgabe: ${C_BOLD}%s (%s)${C_RESET}$(tput el)\n" "$name" "$size"
 
+            # Initialisiere Variablen für den Fall, dass sie nicht im Log gefunden werden
+            local progress=0
+            local speed="0"
+            local eta="--"
+            local state_text="Initialisiere..."
+
             local log_file="$PROJECT_ROOT/logs/$(basename "$name").log"
             if [ -f "$log_file" ]; then
                 local last_line
                 last_line=$(tail -n 1 "$log_file" 2>/dev/null | tr -d '\0\r')
                 
-                local progress speed eta state_text
-
                 if [[ "$last_line" == STATUS:* ]]; then
                     state_text="${last_line#STATUS: }"
                     progress=100
@@ -1875,7 +1879,7 @@ show_queue_status() {
                     mapfile -t q_items < <(cat "$DOWNLOAD_QUEUE_FILE")
                     if [ ${#q_items[@]} -gt 0 ]; then
                         local to_remove
-                        to_remove=$(printf '%s\n' "${q_items[@]}" | awk -F'|' '{print $2 " (" $4 ")"}' | gum filter --placeholder "Spiel(e) zum Entfernen auswählen..." --no-limit)
+                        to_remove=$(printf '%s\n' "${q_items[@]}" | awk -F'|' '{print $2 " (" $4 ")"}' | gum filter --placeholder "Spiel(e) zum Entfernen auswählen..." --no-limit || true)
                         if [[ -n "$to_remove" ]]; then
                              while read -r line; do
                                 local clean_name=$(echo "$line" | sed 's/ ([^)]*)$//')

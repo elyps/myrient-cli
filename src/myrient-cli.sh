@@ -1844,7 +1844,9 @@ show_queue_status() {
             if [ "$queue_count" -gt 1 ]; then
                 local remaining_count=$((queue_count - 1))
                 printf "\n${C_BOLD}%d weitere(s) Spiel(e) in der Warteschlange:${C_RESET}$(tput el)\n" "$remaining_count"
-                tail -n +2 "$DOWNLOAD_QUEUE_FILE" | head -n 5 | awk -F'|' '{print "  - " $2 " (" $4 ")"}' | while read -r line; do
+                local queue_items=()
+                mapfile -t queue_items < <(tail -n +2 "$DOWNLOAD_QUEUE_FILE" 2>/dev/null | head -n 5 | awk -F'|' '{print "  - " $2 " (" $4 ")"}' || true)
+                for line in "${queue_items[@]}"; do
                     printf "%s$(tput el)\n" "$line"
                 done
                 if [ "$queue_count" -gt 6 ]; then

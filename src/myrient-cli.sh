@@ -50,6 +50,7 @@ WATCHLIST_FILE="$PROJECT_ROOT/config/.watchlist"
 DOWNLOAD_QUEUE_FILE="$PROJECT_ROOT/config/.download_queue"
 QUEUE_LOCK_FILE="$PROJECT_ROOT/config/.queue.lock"
 QUEUE_PAUSE_FILE="$PROJECT_ROOT/config/.queue.pause"
+WGET_USER_AGENT="Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/115.0"
 
 
 # --- Farben ---
@@ -1218,7 +1219,7 @@ test_download_speed() {
     # Führe den Download durch und erfasse die Ausgabe von wget (die an stderr gesendet wird)
     local wget_output
     wget_output=$(gum spin --spinner dot --title "Teste Geschwindigkeit..." -- \
-        wget -O /dev/null "$test_file_url" 2>&1)
+        wget --user-agent="$WGET_USER_AGENT" -O /dev/null "$test_file_url" 2>&1)
 
     # Prüfe, ob wget erfolgreich war
     if [[ $? -ne 0 ]]; then
@@ -1642,7 +1643,7 @@ process_download_queue() {
             echo "STATUS: Download startet..." > "$log_file"
 
             # wget im Vordergrund (innerhalb dieses Hintergrund-Skripts) ausführen
-            if wget -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" -o "$log_file" --progress=bar:force:noscroll "${BASE_URL}${path}"; then
+            if wget --user-agent="$WGET_USER_AGENT" -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" -o "$log_file" --progress=bar:force:noscroll "${BASE_URL}${path}"; then
                 
                 # Update status for Dashboard
                 echo "STATUS: Verifying..." >> "$log_file"
@@ -2057,7 +2058,7 @@ search_and_download_games() {
                                     log_file="$PROJECT_ROOT/logs/$(basename "$name").log"
 
                                     echo -e "${C_CYAN}Starte Hintergrund-Download für: ${C_WHITE}$name${C_RESET}" 
-                                    wget -b -c -P "$DOWNLOAD_DIR" --limit-rate="$DOWNLOAD_SPEED_LIMIT" --progress=bar:force:noscroll -o "$log_file" -- "${BASE_URL}${path}" &
+                                    wget --user-agent="$WGET_USER_AGENT" -b -c -P "$DOWNLOAD_DIR" --limit-rate="$DOWNLOAD_SPEED_LIMIT" --progress=bar:force:noscroll -o "$log_file" -- "${BASE_URL}${path}" &
                                     ((count+=1))
                                 done
                                 echo "Alle Downloads wurden in die Warteschlange gestellt. Warten bis alle fertig sind..."
@@ -2082,7 +2083,7 @@ search_and_download_games() {
                                     name=$(echo "$game_choice" | cut -d'|' -f2)
                                     echo -e "${HEADLINE_COLOR}-----------------------------------------------------------------${C_RESET}"
                                     gum style --border normal --padding "0 1" --border-foreground 212 "Starte Download für: $(gum style --bold "$name")"
-                                    if wget -q -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" --show-progress "${BASE_URL}${path}"; then
+                                    if wget --user-agent="$WGET_USER_AGENT" -q -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" --show-progress "${BASE_URL}${path}"; then
                                         gum style --foreground 10 "Download von '$name' abgeschlossen."
                                         # Protokolliere den erfolgreichen Download
                                         mkdir -p "$(dirname "$DOWNLOAD_HISTORY_LOG")"

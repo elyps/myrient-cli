@@ -958,6 +958,9 @@ set_download_speed_limit() {
 
     echo -e "${C_GREEN}Download-Geschwindigkeitsbegrenzung auf '${DOWNLOAD_SPEED_LIMIT}' gesetzt.${C_RESET}"
     save_config "suppress_message"
+    if [[ "$no_save" != "no_save" ]]; then
+        save_config "suppress_message"
+    fi
     gum spin --title "Kehre zum Hauptmenü zurück..." -- sleep 2
 }
 

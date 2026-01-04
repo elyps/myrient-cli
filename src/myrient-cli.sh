@@ -2107,7 +2107,11 @@ search_and_download_games() {
 
                                     echo -e "${C_CYAN}Starte Hintergrund-Download für: ${C_WHITE}$name${C_RESET}" 
                                     if validate_download_directory; then
-                                        wget --user-agent="$WGET_USER_AGENT" -b -c -P "$DOWNLOAD_DIR" --limit-rate="$DOWNLOAD_SPEED_LIMIT" --progress=bar:force:noscroll -o "$log_file" -- "${BASE_URL}${path}" &
+                                        local wget_cmd_bg=("wget" "--user-agent=$WGET_USER_AGENT" "-b" "-c" "-P" "$DOWNLOAD_DIR" "--progress=bar:force:noscroll" "-o" "$log_file")
+                                        if [[ "$DOWNLOAD_SPEED_LIMIT" != "0" && -n "$DOWNLOAD_SPEED_LIMIT" ]]; then
+                                            wget_cmd_bg+=("--limit-rate=$DOWNLOAD_SPEED_LIMIT")
+                                        fi
+                                        "${wget_cmd_bg[@]}" -- "${BASE_URL}${path}" &
                                         ((count+=1))
                                     else
                                         echo -e "${C_RED}Download für $name abgebrochen (Pfad ungültig).${C_RESET}"

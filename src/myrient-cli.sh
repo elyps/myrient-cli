@@ -727,19 +727,11 @@ verify_file_integrity() {
 
         if [[ "$silent" == "silent" ]]; then
             echo "Lade Prüfsummendatei herunter..."
-            if [[ "$DOWNLOAD_SPEED_LIMIT" != "0" && -n "$DOWNLOAD_SPEED_LIMIT" ]]; then
-                wget -q -O "$temp_checksum_file" --user-agent="$WGET_USER_AGENT" --limit-rate="$DOWNLOAD_SPEED_LIMIT" -- "${BASE_URL}${checksum_remote_path}"
-            else
-                wget -q -O "$temp_checksum_file" --user-agent="$WGET_USER_AGENT" -- "${BASE_URL}${checksum_remote_path}"
-            fi
+            wget -q -O "$temp_checksum_file" --limit-rate="$DOWNLOAD_SPEED_LIMIT" -- "${BASE_URL}${checksum_remote_path}"
              echo "Verifiziere Datei..."
         else
-            echo -e "${C_CYAN}Lade Prüfsummendatei herunter...${C_RESET}"
-            if [[ "$DOWNLOAD_SPEED_LIMIT" != "0" && -n "$DOWNLOAD_SPEED_LIMIT" ]]; then
-                gum spin --spinner dot --title "Lade Prüfsummendatei herunter..." -- wget -q -O "$temp_checksum_file" --user-agent="$WGET_USER_AGENT" --limit-rate="$DOWNLOAD_SPEED_LIMIT" -- "${BASE_URL}${checksum_remote_path}"
-            else
-                gum spin --spinner dot --title "Lade Prüfsummendatei herunter..." -- wget -q -O "$temp_checksum_file" --user-agent="$WGET_USER_AGENT" -- "${BASE_URL}${checksum_remote_path}"
-            fi
+            echo -e "${C_CYAN}Lade Prüfsummendatei herunter...${C_RESET}"        
+            gum spin --spinner dot --title "Lade Prüfsummendatei herunter..." -- wget -q -O "$temp_checksum_file" --limit-rate="$DOWNLOAD_SPEED_LIMIT" -- "${BASE_URL}${checksum_remote_path}"
             echo -e "${C_CYAN}Verifiziere Datei (dies kann dauern)...${C_RESET}"
         fi
 
@@ -948,19 +940,10 @@ set_download_speed_limit() {
     fi
 
     new_limit=$(gum input --placeholder "Limit eingeben..." --value "$current_limit_display")
-
-    # Wenn der Benutzer "Unbegrenzt" eingibt oder die Eingabe leer lässt, auf 0 setzen.
-    if [[ -z "$new_limit" || "$new_limit" == "Unbegrenzt" ]]; then
-        DOWNLOAD_SPEED_LIMIT="0"
-    else
-        DOWNLOAD_SPEED_LIMIT="$new_limit"
-    fi
+    DOWNLOAD_SPEED_LIMIT="${new_limit:-0}"
 
     echo -e "${C_GREEN}Download-Geschwindigkeitsbegrenzung auf '${DOWNLOAD_SPEED_LIMIT}' gesetzt.${C_RESET}"
     save_config "suppress_message"
-    if [[ "$no_save" != "no_save" ]]; then
-        save_config "suppress_message"
-    fi
     gum spin --title "Kehre zum Hauptmenü zurück..." -- sleep 2
 }
 
@@ -1701,10 +1684,7 @@ process_download_queue() {
             echo "STATUS: Download startet..." > "$log_file"
 
             # wget im Vordergrund (innerhalb dieses Hintergrund-Skripts) ausführen
-            local wget_cmd=(wget --user-agent="$WGET_USER_AGENT" -P "$DOWNLOAD_DIR" -c)
-            [[ "$DOWNLOAD_SPEED_LIMIT" != "0" && -n "$DOWNLOAD_SPEED_LIMIT" ]] && wget_cmd+=(--limit-rate="$DOWNLOAD_SPEED_LIMIT")
-            wget_cmd+=(-o "$log_file" --progress=bar:force:noscroll "${BASE_URL}${path}")
-            if "${wget_cmd[@]}"; then
+            if wget --user-agent="$WGET_USER_AGENT" -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" -o "$log_file" --progress=bar:force:noscroll "${BASE_URL}${path}"; then
                 
                 # Update status for Dashboard
                 echo "STATUS: Verifying..." >> "$log_file"
@@ -1864,9 +1844,7 @@ show_queue_status() {
             if [ "$queue_count" -gt 1 ]; then
                 local remaining_count=$((queue_count - 1))
                 printf "\n${C_BOLD}%d weitere(s) Spiel(e) in der Warteschlange:${C_RESET}$(tput el)\n" "$remaining_count"
-                local queue_items=()
-                mapfile -t queue_items < <(tail -n +2 "$DOWNLOAD_QUEUE_FILE" 2>/dev/null | head -n 5 | awk -F'|' '{print "  - " $2 " (" $4 ")"}' || true)
-                for line in "${queue_items[@]}"; do
+                tail -n +2 "$DOWNLOAD_QUEUE_FILE" | head -n 5 | awk -F'|' '{print "  - " $2 " (" $4 ")"}' | while read -r line; do
                     printf "%s$(tput el)\n" "$line"
                 done
                 if [ "$queue_count" -gt 6 ]; then
@@ -2110,11 +2088,7 @@ search_and_download_games() {
 
                                     echo -e "${C_CYAN}Starte Hintergrund-Download für: ${C_WHITE}$name${C_RESET}" 
                                     if validate_download_directory; then
-                                        local wget_cmd_bg=("wget" "--user-agent=$WGET_USER_AGENT" "-b" "-c" "-P" "$DOWNLOAD_DIR" "--progress=bar:force:noscroll" "-o" "$log_file")
-                                        if [[ "$DOWNLOAD_SPEED_LIMIT" != "0" && -n "$DOWNLOAD_SPEED_LIMIT" ]]; then
-                                            wget_cmd_bg+=("--limit-rate=$DOWNLOAD_SPEED_LIMIT")
-                                        fi
-                                        "${wget_cmd_bg[@]}" -- "${BASE_URL}${path}" &
+                                        wget --user-agent="$WGET_USER_AGENT" -b -c -P "$DOWNLOAD_DIR" --limit-rate="$DOWNLOAD_SPEED_LIMIT" --progress=bar:force:noscroll -o "$log_file" -- "${BASE_URL}${path}" &
                                         ((count+=1))
                                     else
                                         echo -e "${C_RED}Download für $name abgebrochen (Pfad ungültig).${C_RESET}"
@@ -2143,13 +2117,7 @@ search_and_download_games() {
                                     echo -e "${HEADLINE_COLOR}-----------------------------------------------------------------${C_RESET}"
                                     gum style --border normal --padding "0 1" --border-foreground 212 "Starte Download für: $(gum style --bold "$name")"
                                     if validate_download_directory; then
-                                        local wget_cmd_fg=("wget" "--user-agent=$WGET_USER_AGENT" "-P" "$DOWNLOAD_DIR" "-c" "--show-progress")
-                                        if [[ "$DOWNLOAD_SPEED_LIMIT" != "0" && -n "$DOWNLOAD_SPEED_LIMIT" ]]; then
-                                            wget_cmd_fg+=("--limit-rate=$DOWNLOAD_SPEED_LIMIT")
-                                        fi
-                                        wget_cmd_fg+=("--progress=bar:force:noscroll" "${BASE_URL}${path}")
-
-                                        if "${wget_cmd_fg[@]}"; then
+                                        if wget --user-agent="$WGET_USER_AGENT" -q -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" --show-progress "${BASE_URL}${path}"; then
                                             gum style --foreground 10 "Download von '$name' abgeschlossen."
                                             # Protokolliere den erfolgreichen Download
                                             mkdir -p "$(dirname "$DOWNLOAD_HISTORY_LOG")"

@@ -50,8 +50,6 @@ WATCHLIST_FILE="$PROJECT_ROOT/config/.watchlist"
 DOWNLOAD_QUEUE_FILE="$PROJECT_ROOT/config/.download_queue"
 QUEUE_LOCK_FILE="$PROJECT_ROOT/config/.queue.lock"
 QUEUE_PAUSE_FILE="$PROJECT_ROOT/config/.queue.pause"
-WGET_USER_AGENT="Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/115.0"
-DASHBOARD_REFRESH_INTERVAL=1
 
 
 # --- Farben ---
@@ -89,8 +87,6 @@ get_links() {
             # Filtere Navigations-Links heraus
             if [[ "$display_name" != "./" && "$display_name" != "../" && "$display_name" != "Parent directory/" ]]; then
                 # Ausgabe: Vollständiger KODIERTER Pfad | Anzeigename (bereits dekodiert) | Größe
-                # Bereinige name von Wagenrücklauf-Zeichen (\r)
-                display_name=$(echo "$display_name" | tr -d '\r')
                 echo "${current_path}${encoded_path}|${display_name}|${size}"
             fi
         done
@@ -146,38 +142,6 @@ set_download_directory() {
 
     save_config "suppress_message"
     gum spin --title "Einstellungen gespeichert. Kehre zum Hauptmenü zurück..." -- sleep 2
-}
-
-# Funktion zur Validierung des Download-Verzeichnisses vor dem Start
-validate_download_directory() {
-    while true; do
-        # Absolute Pfad-Expansion
-        local check_dir
-        eval check_dir="$DOWNLOAD_DIR"
-
-        if [[ -d "$check_dir" && -w "$check_dir" ]]; then
-            return 0
-        fi
-
-        clear
-        gum style --border double --margin "1" --padding "1" --border-foreground 9 "FEHLER: Download-Verzeichnis nicht erreichbar" \
-            "Der Pfad '$(gum style --bold "$DOWNLOAD_DIR")' existiert nicht oder ist nicht beschreibbar."
-
-        local choice
-        choice=$(gum choose "Pfad korrigieren" "Erneut versuchen" "Abbrechen")
-
-        case "$choice" in
-            "Pfad korrigieren")
-                set_download_directory
-                ;;
-            "Erneut versuchen")
-                continue
-                ;;
-            "Abbrechen")
-                return 1
-                ;;
-        esac
-    done
 }
 
 # Funktion zum Anzeigen laufender Hintergrund-Downloads
@@ -475,7 +439,6 @@ save_config() { # Akzeptiert ein optionales Argument, um die "Weiter"-Meldung zu
         echo "SEARCH_EXCLUDE_KEYWORDS=\"$SEARCH_EXCLUDE_KEYWORDS\""
         echo "DOWNLOAD_SPEED_LIMIT=\"$DOWNLOAD_SPEED_LIMIT\""
         echo "RE_DOWNLOAD_POLICY=\"$RE_DOWNLOAD_POLICY\""
-        echo "DASHBOARD_REFRESH_INTERVAL=$DASHBOARD_REFRESH_INTERVAL"
     } > "$CONFIG_FILE"
     echo -e "${C_GREEN}Einstellungen gespeichert.${C_RESET}"
 }
@@ -501,7 +464,6 @@ reset_config() {
             SEARCH_EXCLUDE_KEYWORDS="Demo Beta"
             DOWNLOAD_SPEED_LIMIT="0"
             RE_DOWNLOAD_POLICY="ask"
-            DASHBOARD_REFRESH_INTERVAL=1
             gum style --foreground 10 "Konfigurationsdatei entfernt und Einstellungen auf Standardwerte zurückgesetzt."
         else
             echo -e "${C_YELLOW}Vorgang abgebrochen.${C_RESET}"
@@ -727,19 +689,11 @@ verify_file_integrity() {
 
         if [[ "$silent" == "silent" ]]; then
             echo "Lade Prüfsummendatei herunter..."
-            if [[ "$DOWNLOAD_SPEED_LIMIT" != "0" && -n "$DOWNLOAD_SPEED_LIMIT" ]]; then
-                wget -q -O "$temp_checksum_file" --user-agent="$WGET_USER_AGENT" --limit-rate="$DOWNLOAD_SPEED_LIMIT" -- "${BASE_URL}${checksum_remote_path}"
-            else
-                wget -q -O "$temp_checksum_file" --user-agent="$WGET_USER_AGENT" -- "${BASE_URL}${checksum_remote_path}"
-            fi
+            wget -q -O "$temp_checksum_file" --limit-rate="$DOWNLOAD_SPEED_LIMIT" -- "${BASE_URL}${checksum_remote_path}"
              echo "Verifiziere Datei..."
         else
-            echo -e "${C_CYAN}Lade Prüfsummendatei herunter...${C_RESET}"
-            if [[ "$DOWNLOAD_SPEED_LIMIT" != "0" && -n "$DOWNLOAD_SPEED_LIMIT" ]]; then
-                gum spin --spinner dot --title "Lade Prüfsummendatei herunter..." -- wget -q -O "$temp_checksum_file" --user-agent="$WGET_USER_AGENT" --limit-rate="$DOWNLOAD_SPEED_LIMIT" -- "${BASE_URL}${checksum_remote_path}"
-            else
-                gum spin --spinner dot --title "Lade Prüfsummendatei herunter..." -- wget -q -O "$temp_checksum_file" --user-agent="$WGET_USER_AGENT" -- "${BASE_URL}${checksum_remote_path}"
-            fi
+            echo -e "${C_CYAN}Lade Prüfsummendatei herunter...${C_RESET}"        
+            gum spin --spinner dot --title "Lade Prüfsummendatei herunter..." -- wget -q -O "$temp_checksum_file" --limit-rate="$DOWNLOAD_SPEED_LIMIT" -- "${BASE_URL}${checksum_remote_path}"
             echo -e "${C_CYAN}Verifiziere Datei (dies kann dauern)...${C_RESET}"
         fi
 
@@ -1264,7 +1218,7 @@ test_download_speed() {
     # Führe den Download durch und erfasse die Ausgabe von wget (die an stderr gesendet wird)
     local wget_output
     wget_output=$(gum spin --spinner dot --title "Teste Geschwindigkeit..." -- \
-        wget --user-agent="$WGET_USER_AGENT" -O /dev/null "$test_file_url" 2>&1)
+        wget -O /dev/null "$test_file_url" 2>&1)
 
     # Prüfe, ob wget erfolgreich war
     if [[ $? -ne 0 ]]; then
@@ -1556,14 +1510,12 @@ manage_watchlist() {
         case "$action" in
             "Ausgewählte herunterladen")
                 if [ ${#selected_full_items[@]} -gt 0 ]; then
-                    if validate_download_directory; then
-                        add_to_queue "${selected_full_items[@]}"
-                        local added=$QUEUE_ADD_COUNT
-                        process_download_queue &
-                        [ "$added" -gt 0 ] && gum style --foreground 10 "$added Spiel(e) zur Download-Warteschlange hinzugefügt."
-                        show_queue_status
-                        break
-                    fi
+                    add_to_queue "${selected_full_items[@]}"
+                    local added=$QUEUE_ADD_COUNT
+                    process_download_queue &
+                    [ "$added" -gt 0 ] && gum style --foreground 10 "$added Spiel(e) zur Download-Warteschlange hinzugefügt."
+                    show_queue_status
+                    break
                 fi
                 ;;
             "Ausgewählte entfernen")
@@ -1577,14 +1529,12 @@ manage_watchlist() {
                 fi
                 ;;
             "Alles herunterladen")
-                if validate_download_directory; then
-                    add_to_queue "${watchlist_items[@]}"
-                    local added=$QUEUE_ADD_COUNT
-                    process_download_queue &
-                    gum style --foreground 10 "$added Spiel(e) zur Download-Warteschlange hinzugefügt."
-                    show_queue_status
-                    break
-                fi
+                add_to_queue "${watchlist_items[@]}"
+                local added=$QUEUE_ADD_COUNT
+                process_download_queue &
+                gum style --foreground 10 "$added Spiel(e) zur Download-Warteschlange hinzugefügt."
+                show_queue_status
+                break
                 ;;
             "Merkliste leeren")
                 if gum confirm "Möchten Sie die gesamte Merkliste wirklich leeren?"; then
@@ -1692,10 +1642,7 @@ process_download_queue() {
             echo "STATUS: Download startet..." > "$log_file"
 
             # wget im Vordergrund (innerhalb dieses Hintergrund-Skripts) ausführen
-            local wget_cmd=(wget --user-agent="$WGET_USER_AGENT" -P "$DOWNLOAD_DIR" -c)
-            [[ "$DOWNLOAD_SPEED_LIMIT" != "0" && -n "$DOWNLOAD_SPEED_LIMIT" ]] && wget_cmd+=(--limit-rate="$DOWNLOAD_SPEED_LIMIT")
-            wget_cmd+=(-o "$log_file" --progress=bar:force:noscroll "${BASE_URL}${path}")
-            if "${wget_cmd[@]}"; then
+            if wget -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" -o "$log_file" --progress=bar:force:noscroll "${BASE_URL}${path}"; then
                 
                 # Update status for Dashboard
                 echo "STATUS: Verifying..." >> "$log_file"
@@ -1741,34 +1688,25 @@ show_queue_status() {
     # Dedupliziere die Warteschlange beim Öffnen des Dashboards
     deduplicate_queue
 
-    # Zeichne statische Teile einmalig
-    gum style --border normal --margin "1" --padding "1" --border-foreground 212 "Download-Dashboard" "Drücken Sie [q] oder eine beliebige Auswahltaste zum Beenden."
-    
-    # Merke Startzeile für dynamischen Bereich (Header ist ca. 5-6 Zeilen hoch)
-    local dynamic_start_row=7
-
     while true; do
-        tput cup "$dynamic_start_row" 0
-        
+        tput cup 0 0 # Cursor oben links positionieren (verhindert Flackern durch 'clear')
+        gum style --border normal --margin "1" --padding "1" --border-foreground 212 "Download-Dashboard" "Drücken Sie eine beliebige Taste, um zurückzukehren."
+
         if [ ! -s "$DOWNLOAD_QUEUE_FILE" ]; then
+            gum style --padding "1" "Die Warteschlange ist leer (oder Aufgaben abgeschlossen)."
             if [ -f "$QUEUE_LOCK_FILE" ]; then
-                 printf "${C_GREEN}Hintergrund-Prozess ist noch aktiv (schließt Abschlussarbeiten ab)...$(tput el)\n"
+                 gum style --foreground 10 "Hintergrund-Prozess ist noch aktiv (schließt Abschlussarbeiten ab)..."
             else
-                 printf "${C_PURPLE}Die Warteschlange ist leer oder Aufgaben abgeschlossen.$(tput el)\n"
-                 printf "${C_PURPLE}Keine aktiven Downloads.$(tput el)\n"
+                 gum style --foreground 212 "Keine aktiven Downloads."
             fi
-            # Lösche den Rest des Bildschirms unter der Meldung
-            tput ed
         else
             # Starte den Prozessor nur, wenn er nicht bereits läuft
             if [ ! -f "$QUEUE_LOCK_FILE" ] || ! kill -0 $(cat "$QUEUE_LOCK_FILE" 2>/dev/null) 2>/dev/null; then
+                 # Sicherstellen, dass das alte Lock-File entfernt wird, falls der Prozess abgestürzt ist
                  rm -f "$QUEUE_LOCK_FILE"
-                 if validate_download_directory; then
-                    process_download_queue &
-                    sleep 0.5
-                 else
-                    break
-                 fi
+                 process_download_queue &
+                 # Kurze Pause, damit der Prozess Zeit hat, das Lock-File zu erstellen
+                 sleep 0.5
             fi
 
             local current_download
@@ -1777,25 +1715,27 @@ show_queue_status() {
             name=$(echo "$current_download" | cut -d'|' -f2)
             size=$(echo "$current_download" | cut -d'|' -f3)
 
-            printf "Aktive Aufgabe: ${C_BOLD}%s (%s)${C_RESET}$(tput el)\n" "$name" "$size"
-
-            # Initialisiere Variablen für den Fall, dass sie nicht im Log gefunden werden
-            local progress=0
-            local speed="0"
-            local eta="--"
-            local state_text="Initialisiere..."
+            gum style "Aktive Aufgabe: $(gum style --bold "$name ($size)")"
 
             local log_file="$PROJECT_ROOT/logs/$(basename "$name").log"
             if [ -f "$log_file" ]; then
                 local last_line
                 last_line=$(tail -n 1 "$log_file" 2>/dev/null | tr -d '\0\r')
                 
+                local progress speed eta state_text
+
                 if [[ "$last_line" == STATUS:* ]]; then
                     state_text="${last_line#STATUS: }"
                     progress=100
-                    if [[ "$state_text" =~ ([0-9]+)% ]]; then progress="${BASH_REMATCH[1]}"; fi
-                    printf "${C_GREEN}Status: %-30s${C_RESET}$(tput el)\n" "$state_text"
+                    
+                    # Wenn wir Fortschritt in der Statuszeile haben (von 7z -bsp1)
+                    if [[ "$state_text" =~ ([0-9]+)% ]]; then
+                        progress="${BASH_REMATCH[1]}"
+                    fi
+
+                    gum style --foreground 10 "Status: $state_text"
                 elif [[ "$last_line" =~ ([0-9]+%) ]] && [[ "$last_line" =~ (eta|s$|B/s) ]]; then
+                    # Eindeutige Erkennung von wget Fortschritt
                     progress=$(echo "$last_line" | sed -n 's/.* \([0-9]\+%\).*/\1/p' | sed 's/%//g')
                     progress=${progress:-0}
                     speed=$(echo "$last_line" | sed -n 's/.* \([0-9.,-]*[KMGT]*B\/s\).*/\1/p')
@@ -1803,96 +1743,112 @@ show_queue_status() {
                     eta=$(echo "$last_line" | sed -n 's/.*eta \([0-9ms h]*\).*/\1/p')
                     eta=${eta:-"N/A"}
                     state_text="Wird heruntergeladen..."
-                    printf "Status: %-30s$(tput el)\n" "$state_text"
+                    
+                    gum style "Status: $state_text"
                 elif [[ "$last_line" =~ ([0-9]+)% ]]; then
+                    # Universeller Parser für Fortschritt in der letzten Zeile (z.B. Entpacken)
                     progress="${BASH_REMATCH[1]}"
+                    speed="-"
+                    eta="-"
+                    
+                    # Suche nach der letzten "STATUS:" Zeile, um den Kontext zu kennen
                     local context
-                    context=$(grep -ao "STATUS:.*" "$log_file" | tail -n 1 | tr -d '\0' || true)
-                    state_text="${context#STATUS: }"
-                    if [[ "$state_text" =~ ^[0-9]+%$ ]]; then
-                         local prev_context
-                         prev_context=$(grep -ao "STATUS:.*" "$log_file" | grep -v "[0-9]%" | tail -n 1 | tr -d '\0' || true)
-                         [[ -n "$prev_context" ]] && state_text="${prev_context#STATUS: }"
+                    context=$(grep -a "STATUS:" "$log_file" | tail -n 1 | tr -d '\0' || true)
+                    if [[ -n "$context" ]]; then
+                        state_text="${context#STATUS: }"
+                        # Wenn der Status selbst ein Fortschritt ist (z.B. "10%"), 
+                        # versuche den vorherigen Status für den Text zu finden
+                        if [[ "$state_text" =~ ^[0-9]+%$ ]]; then
+                             local prev_context
+                             prev_context=$(grep -a "STATUS:" "$log_file" | grep -v "[0-9]%" | tail -n 1 | tr -d '\0' || true)
+                             if [[ -n "$prev_context" ]]; then
+                                state_text="${prev_context#STATUS: }"
+                             fi
+                        fi
+                    else
+                        state_text="In Bearbeitung..."
                     fi
-                    [[ -z "$state_text" ]] && state_text="In Bearbeitung..."
-                    printf "Status: %-30s$(tput el)\n" "$state_text"
+                    
+                    gum style "Status: $state_text"
                 else
                     progress=0
+                    speed="-"
+                    eta="-"
+                    state_text="Initialisiere..."
+                    
+                    # Suche nach der letzten "STATUS:" Zeile
                     local context
-                    context=$(grep -ao "STATUS:.*" "$log_file" | tail -n 1 | tr -d '\0' || true)
-                    state_text="${context#STATUS: }"
-                    [[ -z "$state_text" ]] && state_text="Initialisiere..."
-                    printf "Status: %-30s$(tput el)\n" "$state_text"
+                    context=$(grep -a "STATUS:" "$log_file" | tail -n 1 | tr -d '\0' || true)
+                    if [[ -n "$context" ]]; then
+                        state_text="${context#STATUS: }"
+                    fi
+                    gum style "Status: $state_text"
                 fi
 
                 # Manuelle Progress Bar Berechnung
                 local bar_width=40
-                local filled_len=$(( (progress * bar_width) / 100 ))
+                local filled_len=$(echo "($progress * $bar_width) / 100" | bc)
                 local empty_len=$((bar_width - filled_len))
                 local bar=""
-                [ "$filled_len" -gt 0 ] && bar=$(printf "%0.s█" $(seq 1 $filled_len))
-                [ "$empty_len" -gt 0 ] && bar="${bar}$(printf "%0.s░" $(seq 1 $empty_len))"
+                if [ "$filled_len" -gt 0 ]; then
+                    bar=$(printf "%0.s█" $(seq 1 $filled_len))
+                fi
+                if [ "$empty_len" -gt 0 ]; then
+                    bar="${bar}$(printf "%0.s░" $(seq 1 $empty_len))"
+                fi
                 
-                local bar_color_code="\033[0;35m" # Pink-ish (212 equiv)
-                [[ "$progress" -eq 100 ]] && bar_color_code="${C_GREEN}"
+                local bar_color=212
+                if [[ "$progress" -eq 100 ]]; then bar_color=10; fi
                 
-                printf "${bar_color_code}[%s]${C_RESET}  %3d%%$(tput el)\n" "$bar" "$progress"
-                
+                gum join --horizontal "$(gum style --foreground "$bar_color" "[$bar]")" "  $progress%"
                 if [[ "$state_text" == "Wird heruntergeladen..." ]]; then
-                    printf "Geschwindigkeit: %-10s | Verbleibend: %-10s$(tput el)\n" "$speed" "$eta"
-                else
-                    printf "$(tput el)\n"
+                    gum style "Geschwindigkeit: $speed | Verbleibend: $eta"
                 fi
             else
-                printf "Warte auf Start...$(tput el)\n"
-                printf "$(tput el)\n"
-                printf "$(tput el)\n"
-                printf "$(tput el)\n"
+                gum style "Warte auf Start..."
             fi
 
             local queue_count
             queue_count=$(wc -l < "$DOWNLOAD_QUEUE_FILE")
             if [ "$queue_count" -gt 1 ]; then
                 local remaining_count=$((queue_count - 1))
-                printf "\n${C_BOLD}%d weitere(s) Spiel(e) in der Warteschlange:${C_RESET}$(tput el)\n" "$remaining_count"
-                local queue_items=()
-                mapfile -t queue_items < <(tail -n +2 "$DOWNLOAD_QUEUE_FILE" 2>/dev/null | head -n 5 | awk -F'|' '{print "  - " $2 " (" $4 ")"}' || true)
-                for line in "${queue_items[@]}"; do
-                    printf "%s$(tput el)\n" "$line"
-                done
-                if [ "$queue_count" -gt 6 ]; then
-                    printf "  ... und %d weitere$(tput el)\n" $((queue_count - 6))
-                fi
-            else
-                # Lösche Bereich falls keine weiteren Items
-                tput ed
+                echo -e "\n$(gum style --bold "$remaining_count") weitere(s) Spiel(e) in der Warteschlange:"
+                tail -n +2 "$DOWNLOAD_QUEUE_FILE" | awk -F'|' '{print "  - " $2 " (" $4 ")"}'
             fi
         fi
         
-        # Zeige Steuerungsoptionen an fixierten Zeilen unten (oder relativ)
-        # Wir springen ans Ende des Bildschirms oder lassen etwas Platz
-        tput cup $(($(tput lines) - 2)) 0
+        # Zeige Steuerungsoptionen an
         local status_msg=""
-        [ -f "$QUEUE_PAUSE_FILE" ] && status_msg="${C_YELLOW}PAUSIERT${C_RESET} - "
+        if [ -f "$QUEUE_PAUSE_FILE" ]; then
+            status_msg="$(gum style --foreground 3 "PAUSIERT") - "
+        fi
         
+        # Zeige einen blinkenden Indikator für "Aktivität"
         local activity_info=" "
-        (( $(date +%s) % 2 == 0 )) && activity_info="•"
+        if (( $(date +%s) % 2 == 0 )); then activity_info="•"; fi
         
-        printf "${status_msg}${activity_info} ${C_PURPLE}[p] Pause  [m] Verwalten  [c] Alles Abbrechen  [q] Zurück${C_RESET}$(tput el)"
+        gum style --align center "${status_msg}${activity_info} $(gum style --foreground 212 "[p] Pause  [m] Verwalten  [c] Alles Abbrechen  [q] Zurück")"
+
+        tput ed # Lösche den Rest des Bildschirms
 
         # Check user input
-        if read -t "$DASHBOARD_REFRESH_INTERVAL" -n 1 key; then
+        if read -t 1 -n 1 key; then
             case "$key" in
                 p|P)
-                    [ -f "$QUEUE_PAUSE_FILE" ] && rm "$QUEUE_PAUSE_FILE" || touch "$QUEUE_PAUSE_FILE"
+                    if [ -f "$QUEUE_PAUSE_FILE" ]; then
+                        rm "$QUEUE_PAUSE_FILE"
+                    else
+                        touch "$QUEUE_PAUSE_FILE"
+                    fi
                     ;;
                 m|M|e|E)
+                    # Warteschlange manuell verwalten (einzelne Einträge löschen)
                     tput cnorm
                     local q_items=()
                     mapfile -t q_items < <(cat "$DOWNLOAD_QUEUE_FILE")
                     if [ ${#q_items[@]} -gt 0 ]; then
                         local to_remove
-                        to_remove=$(printf '%s\n' "${q_items[@]}" | awk -F'|' '{print $2 " (" $4 ")"}' | gum filter --placeholder "Spiel(e) zum Entfernen auswählen..." --no-limit || true)
+                        to_remove=$(printf '%s\n' "${q_items[@]}" | awk -F'|' '{print $2 " (" $4 ")"}' | gum filter --placeholder "Spiel(e) zum Entfernen auswählen..." --no-limit)
                         if [[ -n "$to_remove" ]]; then
                              while read -r line; do
                                 local clean_name=$(echo "$line" | sed 's/ ([^)]*)$//')
@@ -1901,10 +1857,10 @@ show_queue_status() {
                              done <<< "$to_remove"
                         fi
                     fi
-                    tput civis; clear
-                    gum style --border normal --margin "1" --padding "1" --border-foreground 212 "Download-Dashboard" "Drücken Sie [q] oder eine beliebige Auswahltaste zum Beenden."
+                    tput civis
                     ;;
                 c|C)
+                    # Cursor wiederherstellen für gum confirm
                     tput cnorm 
                     tput cup $(tput lines) 0
                     if gum confirm "GESAMTE Warteschlange wirklich abbrechen?" --affirmative="Ja" --negative="Nein"; then
@@ -1913,10 +1869,11 @@ show_queue_status() {
                         sleep 1
                         break
                     fi
-                    tput civis; clear
-                    gum style --border normal --margin "1" --padding "1" --border-foreground 212 "Download-Dashboard" "Drücken Sie [q] oder eine beliebige Auswahltaste zum Beenden."
+                    tput civis
                     ;;
-                q|Q) break ;;
+                q|Q)
+                     break 
+                     ;;
             esac
         fi
     done
@@ -2100,12 +2057,8 @@ search_and_download_games() {
                                     log_file="$PROJECT_ROOT/logs/$(basename "$name").log"
 
                                     echo -e "${C_CYAN}Starte Hintergrund-Download für: ${C_WHITE}$name${C_RESET}" 
-                                    if validate_download_directory; then
-                                        wget --user-agent="$WGET_USER_AGENT" -b -c -P "$DOWNLOAD_DIR" --limit-rate="$DOWNLOAD_SPEED_LIMIT" --progress=bar:force:noscroll -o "$log_file" -- "${BASE_URL}${path}" &
-                                        ((count+=1))
-                                    else
-                                        echo -e "${C_RED}Download für $name abgebrochen (Pfad ungültig).${C_RESET}"
-                                    fi
+                                    wget -b -c -P "$DOWNLOAD_DIR" --limit-rate="$DOWNLOAD_SPEED_LIMIT" --progress=bar:force:noscroll -o "$log_file" -- "${BASE_URL}${path}" &
+                                    ((count+=1))
                                 done
                                 echo "Alle Downloads wurden in die Warteschlange gestellt. Warten bis alle fertig sind..."
                                 wait # Warte auf alle Hintergrundprozesse in dieser Schleife
@@ -2129,24 +2082,20 @@ search_and_download_games() {
                                     name=$(echo "$game_choice" | cut -d'|' -f2)
                                     echo -e "${HEADLINE_COLOR}-----------------------------------------------------------------${C_RESET}"
                                     gum style --border normal --padding "0 1" --border-foreground 212 "Starte Download für: $(gum style --bold "$name")"
-                                    if validate_download_directory; then
-                                        if wget --user-agent="$WGET_USER_AGENT" -q -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" --show-progress "${BASE_URL}${path}"; then
-                                            gum style --foreground 10 "Download von '$name' abgeschlossen."
-                                            # Protokolliere den erfolgreichen Download
-                                            mkdir -p "$(dirname "$DOWNLOAD_HISTORY_LOG")"
-                                            echo "[$(date '+%Y-%m-%d %H:%M:%S')] - [$console_name] - $name" >> "$DOWNLOAD_HISTORY_LOG"
-                                            # Lösche die Log-Datei, falls eine durch einen vorherigen fehlgeschlagenen Versuch existiert
-                                            rm -f "$PROJECT_ROOT/logs/$(basename "$name").log" 2>/dev/null
-                                            
-                                            verify_file_integrity "$DOWNLOAD_DIR/$name"
-                                            
-                                            if [[ "$AUTO_EXTRACT" == "yes" ]]; then
-                                                extract_archive "$DOWNLOAD_DIR/$name"
-                                            fi
-                                        fi # End of if wget successful
-                                    else
-                                        echo -e "${C_RED}Download für $name abgebrochen (Pfad ungültig).${C_RESET}"
-                                    fi
+                                    if wget -q -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" --show-progress "${BASE_URL}${path}"; then
+                                        gum style --foreground 10 "Download von '$name' abgeschlossen."
+                                        # Protokolliere den erfolgreichen Download
+                                        mkdir -p "$(dirname "$DOWNLOAD_HISTORY_LOG")"
+                                        echo "[$(date '+%Y-%m-%d %H:%M:%S')] - [$console_name] - $name" >> "$DOWNLOAD_HISTORY_LOG"
+                                        # Lösche die Log-Datei, falls eine durch einen vorherigen fehlgeschlagenen Versuch existiert
+                                        rm -f "$PROJECT_ROOT/logs/$(basename "$name").log" 2>/dev/null
+                                        
+                                        verify_file_integrity "$DOWNLOAD_DIR/$name"
+                                        
+                                        if [[ "$AUTO_EXTRACT" == "yes" ]]; then
+                                            extract_archive "$DOWNLOAD_DIR/$name"
+                                        fi
+                                    fi # End of if wget successful
                                 done
                             fi
                             ;;

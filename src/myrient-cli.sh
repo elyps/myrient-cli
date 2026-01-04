@@ -928,7 +928,7 @@ fetch_ip_info() {
 
 # Funktion zum Festlegen der Download-Geschwindigkeitsbegrenzung
 set_download_speed_limit() {
-    local no_save="$1"
+    local no_save="${1:-}"
     gum style --border normal --margin "1" --padding "1" --border-foreground 212 "Download-Geschwindigkeit festlegen"
     gum style "Geben Sie ein Limit an (z.B. '500k', '1.5m'). Leer für unbegrenzt."
 
@@ -1309,7 +1309,7 @@ set_exclude_keywords() {
 
 # Funktion zum Umschalten des automatischen Löschens von Archiven
 toggle_delete_archive_after_extract() {
-    local no_save="$1"
+    local no_save="${1:-}"
     gum style --border normal --margin "1" --padding "1" --border-foreground 212 "Archiv nach Entpacken löschen umschalten"
     if [[ "$DELETE_ARCHIVE_AFTER_EXTRACT" == "yes" ]]; then
         DELETE_ARCHIVE_AFTER_EXTRACT="no"

@@ -2140,7 +2140,13 @@ search_and_download_games() {
                                     echo -e "${HEADLINE_COLOR}-----------------------------------------------------------------${C_RESET}"
                                     gum style --border normal --padding "0 1" --border-foreground 212 "Starte Download für: $(gum style --bold "$name")"
                                     if validate_download_directory; then
-                                        if wget --user-agent="$WGET_USER_AGENT" -q -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" --show-progress "${BASE_URL}${path}"; then
+                                        local wget_cmd_fg=("wget" "--user-agent=$WGET_USER_AGENT" "-P" "$DOWNLOAD_DIR" "-c" "--show-progress")
+                                        if [[ "$DOWNLOAD_SPEED_LIMIT" != "0" && -n "$DOWNLOAD_SPEED_LIMIT" ]]; then
+                                            wget_cmd_fg+=("--limit-rate=$DOWNLOAD_SPEED_LIMIT")
+                                        fi
+                                        wget_cmd_fg+=("--progress=bar:force:noscroll" "${BASE_URL}${path}")
+
+                                        if "${wget_cmd_fg[@]}"; then
                                             gum style --foreground 10 "Download von '$name' abgeschlossen."
                                             # Protokolliere den erfolgreichen Download
                                             mkdir -p "$(dirname "$DOWNLOAD_HISTORY_LOG")"

@@ -727,11 +727,11 @@ verify_file_integrity() {
 
         if [[ "$silent" == "silent" ]]; then
             echo "Lade Prüfsummendatei herunter..."
-            wget -q -O "$temp_checksum_file" --limit-rate="$DOWNLOAD_SPEED_LIMIT" -- "${BASE_URL}${checksum_remote_path}"
+            wget --user-agent="$WGET_USER_AGENT" -q -O "$temp_checksum_file" --limit-rate="$DOWNLOAD_SPEED_LIMIT" -- "${BASE_URL}${checksum_remote_path}"
              echo "Verifiziere Datei..."
         else
             echo -e "${C_CYAN}Lade Prüfsummendatei herunter...${C_RESET}"        
-            gum spin --spinner dot --title "Lade Prüfsummendatei herunter..." -- wget -q -O "$temp_checksum_file" --limit-rate="$DOWNLOAD_SPEED_LIMIT" -- "${BASE_URL}${checksum_remote_path}"
+            gum spin --spinner dot --title "Lade Prüfsummendatei herunter..." -- wget --user-agent="$WGET_USER_AGENT" -q -O "$temp_checksum_file" --limit-rate="$DOWNLOAD_SPEED_LIMIT" -- "${BASE_URL}${checksum_remote_path}"
             echo -e "${C_CYAN}Verifiziere Datei (dies kann dauern)...${C_RESET}"
         fi
 
@@ -2117,7 +2117,7 @@ search_and_download_games() {
                                     echo -e "${HEADLINE_COLOR}-----------------------------------------------------------------${C_RESET}"
                                     gum style --border normal --padding "0 1" --border-foreground 212 "Starte Download für: $(gum style --bold "$name")"
                                     if validate_download_directory; then
-                                        if wget --user-agent="$WGET_USER_AGENT" -q -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" --show-progress "${BASE_URL}${path}"; then
+                                        if wget --user-agent="$WGET_USER_AGENT" -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" --show-progress "${BASE_URL}${path}"; then
                                             gum style --foreground 10 "Download von '$name' abgeschlossen."
                                             # Protokolliere den erfolgreichen Download
                                             mkdir -p "$(dirname "$DOWNLOAD_HISTORY_LOG")"

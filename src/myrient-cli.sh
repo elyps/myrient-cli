@@ -50,7 +50,8 @@ WATCHLIST_FILE="$PROJECT_ROOT/config/.watchlist"
 DOWNLOAD_QUEUE_FILE="$PROJECT_ROOT/config/.download_queue"
 QUEUE_LOCK_FILE="$PROJECT_ROOT/config/.queue.lock"
 QUEUE_PAUSE_FILE="$PROJECT_ROOT/config/.queue.pause"
-WGET_USER_AGENT="Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/115.0"
+DASHBOARD_REFRESH_INTERVAL=1
+
 DASHBOARD_REFRESH_INTERVAL=1
 
 
@@ -1843,9 +1844,9 @@ show_queue_status() {
             if [ "$queue_count" -gt 1 ]; then
                 local remaining_count=$((queue_count - 1))
                 printf "\n${C_BOLD}%d weitere(s) Spiel(e) in der Warteschlange:${C_RESET}$(tput el)\n" "$remaining_count"
-                tail -n +2 "$DOWNLOAD_QUEUE_FILE" | head -n 5 | awk -F'|' '{print "  - " $2 " (" $4 ")"}' | while read -r line; do
-                    printf "%s$(tput el)\n" "$line"
-                done
+                # Effizientere Methode, um die nächsten 5 Zeilen zu verarbeiten, ohne eine Subshell-Schleife
+                awk -F'|' 'NR > 1 && NR <= 6 {printf "  - %s (%s)%s\n", $2, $4, "\033[K"}' "$DOWNLOAD_QUEUE_FILE"
+
                 if [ "$queue_count" -gt 6 ]; then
                     printf "  ... und %d weitere$(tput el)\n" $((queue_count - 6))
                 fi

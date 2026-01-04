@@ -727,11 +727,11 @@ verify_file_integrity() {
 
         if [[ "$silent" == "silent" ]]; then
             echo "Lade Prüfsummendatei herunter..."
-            wget --user-agent="$WGET_USER_AGENT" -q -O "$temp_checksum_file" --limit-rate="$DOWNLOAD_SPEED_LIMIT" -- "${BASE_URL}${checksum_remote_path}"
+            wget -q -O "$temp_checksum_file" --limit-rate="$DOWNLOAD_SPEED_LIMIT" -- "${BASE_URL}${checksum_remote_path}"
              echo "Verifiziere Datei..."
         else
             echo -e "${C_CYAN}Lade Prüfsummendatei herunter...${C_RESET}"        
-            gum spin --spinner dot --title "Lade Prüfsummendatei herunter..." -- wget --user-agent="$WGET_USER_AGENT" -q -O "$temp_checksum_file" --limit-rate="$DOWNLOAD_SPEED_LIMIT" -- "${BASE_URL}${checksum_remote_path}"
+            gum spin --spinner dot --title "Lade Prüfsummendatei herunter..." -- wget -q -O "$temp_checksum_file" --limit-rate="$DOWNLOAD_SPEED_LIMIT" -- "${BASE_URL}${checksum_remote_path}"
             echo -e "${C_CYAN}Verifiziere Datei (dies kann dauern)...${C_RESET}"
         fi
 
@@ -1255,8 +1255,7 @@ test_download_speed() {
 
     # Führe den Download durch und erfasse die Ausgabe von wget (die an stderr gesendet wird)
     local wget_output
-    wget_output=$(gum spin --spinner dot --title "Teste Geschwindigkeit..." -- \
-        wget --user-agent="$WGET_USER_AGENT" -O /dev/null "$test_file_url" 2>&1)
+    wget_output=$(gum spin --spinner dot --title "Teste Geschwindigkeit..." -- wget -O /dev/null "$test_file_url" 2>&1)
 
     # Prüfe, ob wget erfolgreich war
     if [[ $? -ne 0 ]]; then
@@ -1684,7 +1683,7 @@ process_download_queue() {
             echo "STATUS: Download startet..." > "$log_file"
 
             # wget im Vordergrund (innerhalb dieses Hintergrund-Skripts) ausführen
-            if wget --user-agent="$WGET_USER_AGENT" -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" -o "$log_file" --progress=bar:force:noscroll "${BASE_URL}${path}"; then
+            if wget -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" -o "$log_file" --progress=bar:force:noscroll "${BASE_URL}${path}"; then
                 
                 # Update status for Dashboard
                 echo "STATUS: Verifying..." >> "$log_file"
@@ -2088,7 +2087,7 @@ search_and_download_games() {
 
                                     echo -e "${C_CYAN}Starte Hintergrund-Download für: ${C_WHITE}$name${C_RESET}" 
                                     if validate_download_directory; then
-                                        wget --user-agent="$WGET_USER_AGENT" -b -c -P "$DOWNLOAD_DIR" --limit-rate="$DOWNLOAD_SPEED_LIMIT" --progress=bar:force:noscroll -o "$log_file" -- "${BASE_URL}${path}" &
+                                        wget -b -c -P "$DOWNLOAD_DIR" --limit-rate="$DOWNLOAD_SPEED_LIMIT" --progress=bar:force:noscroll -o "$log_file" -- "${BASE_URL}${path}" &
                                         ((count+=1))
                                     else
                                         echo -e "${C_RED}Download für $name abgebrochen (Pfad ungültig).${C_RESET}"
@@ -2117,7 +2116,7 @@ search_and_download_games() {
                                     echo -e "${HEADLINE_COLOR}-----------------------------------------------------------------${C_RESET}"
                                     gum style --border normal --padding "0 1" --border-foreground 212 "Starte Download für: $(gum style --bold "$name")"
                                     if validate_download_directory; then
-                                        if wget --user-agent="$WGET_USER_AGENT" -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" --show-progress "${BASE_URL}${path}"; then
+                                        if wget -P "$DOWNLOAD_DIR" -c --limit-rate="$DOWNLOAD_SPEED_LIMIT" --show-progress "${BASE_URL}${path}"; then
                                             gum style --foreground 10 "Download von '$name' abgeschlossen."
                                             # Protokolliere den erfolgreichen Download
                                             mkdir -p "$(dirname "$DOWNLOAD_HISTORY_LOG")"

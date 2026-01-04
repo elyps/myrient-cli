@@ -948,7 +948,13 @@ set_download_speed_limit() {
     fi
 
     new_limit=$(gum input --placeholder "Limit eingeben..." --value "$current_limit_display")
-    DOWNLOAD_SPEED_LIMIT="${new_limit:-0}"
+
+    # Wenn der Benutzer "Unbegrenzt" eingibt oder die Eingabe leer lässt, auf 0 setzen.
+    if [[ -z "$new_limit" || "$new_limit" == "Unbegrenzt" ]]; then
+        DOWNLOAD_SPEED_LIMIT="0"
+    else
+        DOWNLOAD_SPEED_LIMIT="$new_limit"
+    fi
 
     echo -e "${C_GREEN}Download-Geschwindigkeitsbegrenzung auf '${DOWNLOAD_SPEED_LIMIT}' gesetzt.${C_RESET}"
     save_config "suppress_message"
